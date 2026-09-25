@@ -61,6 +61,14 @@
              background:var(--rec); color:transparent; font-size:1px; }
   body.recording #bar, body.recording #top { display:none; }
 
+  /* рамка безопасной зоны: видно только при съёмке и только на экране —
+     в сам клип она не попадает, потому что записывается холст, а не страница */
+  #zones { position:fixed; z-index:3; pointer-events:none; display:none;
+           border:1px dashed rgba(255,255,255,.35); border-radius:14px; }
+  body.recording #zones.on { display:block; }
+  #zones::after { content:'зона TikTok'; position:absolute; left:6px; bottom:-20px;
+                  font-size:11px; color:rgba(255,255,255,.45); }
+
   /* меню-шторка */
   #sheet { position:fixed; inset:auto 0 0 0; z-index:7; background:var(--panel);
            border-top:1px solid var(--line); border-radius:20px 20px 0 0;
@@ -116,6 +124,8 @@
 <canvas id="canvas"></canvas>
 <div id="safe"></div>
 
+<div id="zones"></div>
+
 <div id="top">
   <span id="nowPlaying" class="pill"></span>
 </div>
@@ -165,6 +175,18 @@
       <span class="chip" data-flag="plates">Плашки</span>
       <span class="chip" data-flag="mirror">Зеркало</span>
     </div>
+    <h2>Кадр</h2>
+    <div class="row">
+      <span class="chip on" data-flag="film">Плёнка</span>
+      <span class="chip on" data-flag="face">Кадр по лицу</span>
+      <span class="chip on" data-flag="zones">Зоны TikTok</span>
+    </div>
+    <h2>Запись</h2>
+    <div class="row">
+      <span class="chip" data-flag="mic">Голос в запись</span>
+    </div>
+    <p class="dim">Клип пишется в 1080p. Голос выключен: иначе микрофон ловит песню
+      из динамика и накладывает её на чистую дорожку.</p>
     <h2>Проверить</h2>
     <div class="row">
       <button id="demoBtn" class="grow">✨ Показать все эффекты</button>

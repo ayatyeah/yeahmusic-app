@@ -1,5 +1,5 @@
 // Офлайн-режим: код приложения кладём в кэш, распознавание руками грузится из сети.
-const CACHE = 'yeahmusic-v7';
+const CACHE = 'yeahmusic-v8';
 const FILES = ['./', 'index.html', 'app.js', 'effects.js', 'vision.js', 'store.js',
                'manifest.webmanifest', 'icon.png'];
 

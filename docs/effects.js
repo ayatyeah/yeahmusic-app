@@ -10,6 +10,25 @@ const RISE = 24;                        // px в секунду: строки м
 const FADE = 250, SHAPE_MS = 650, BOOM_MS = 340, SHAKE_MS = 650, JUMP_MS = 700;
 const BOOM_SCALE = 0.13, BOOM_SWAY = 16, JUMP_PX = 170;
 const GHOST_DELAYS = [0.18, 0.36], GHOST_ALPHA = [0.33, 0.2];
+const SHOOT_W = 1080;                   // ширина кадра при записи — как просит TikTok
+const FOLLOW = 0.1;                     // плавность слежения за лицом
+const FACE_UP = 0.42;                   // лицо держим чуть выше середины кадра
+const GRAIN = 96;                       // размер плитки с зерном
+
+/** Плитка с зерном: рисуем один раз и потом только сдвигаем. */
+function makeGrain() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = GRAIN;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(GRAIN, GRAIN);
+  for (let i = 0; i < GRAIN * GRAIN; i++) {
+    const v = 90 + Math.random() * 76;
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
 
 const ease = (t) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -41,26 +60,58 @@ export class Stage {
     this.punch = 1;              // удар зумом в такт (когда кадр во весь экран)
     this.rings = [];             // круги-волны от сильных ударов
     this.sparks = [];            // искры под бит
-    // сколько сверху и снизу занято телефоном (чёлка, полоса «домой») и нашими кнопками
-    this.safe = { top: 0, bottom: 0 };
+    // сколько по краям занято телефоном (чёлка, полоса «домой»), нашими кнопками
+    // и кнопками самого TikTok (справа лайки, снизу подпись)
+    this.safe = { top: 0, right: 0, bottom: 0, left: 0 };
+    this.shoot = false;          // идёт запись — рисуем крупнее, чтобы клип был 1080p
+    this.film = true;            // плёночный вид: тёплый подтон, виньетка, зерно
+    this.follow = true;          // кадр держит лицо
+    this.focus = { x: 0.5, y: 0.45 };
+    this.faceAt = -9;
+    this.grain = null;
   }
 
-  get topY() { return this.safe.top; }
+  get topY() { return this.safe.top || 0; }
 
-  get bottomY() { return this.H - this.safe.bottom; }
+  get bottomY() { return this.H - (this.safe.bottom || 0); }
+
+  get leftX() { return this.safe.left || 0; }
+
+  get rightX() { return this.W - (this.safe.right || 0); }
+
+  /** Середина свободного места: правый край экрана занят кнопками TikTok. */
+  get midX() { return (this.leftX + this.rightX) / 2; }
+
+  get safeW() { return this.rightX - this.leftX; }
+
+  /** Куда смотреть камере: доли всего кадра (лицо). */
+  lookAt(x, y, now) {
+    this.faceAt = now;
+    this.focus.x += (x - this.focus.x) * FOLLOW;
+    this.focus.y += (y - this.focus.y) * FOLLOW;
+  }
 
   resize() {
     // размер берём у самого холста: innerWidth/innerHeight на телефоне врут из-за полос
     // браузера, и тогда картинка растягивается — лицо становится широким
     const r = this.cv.getBoundingClientRect();
     const w = Math.round(r.width) || innerWidth, h = Math.round(r.height) || innerHeight;
-    const dpr = Math.min(devicePixelRatio || 1, 2) * this.quality;
+    // в записи плотность фиксируем: кадр 1080 по ширине и не меняется на ходу
+    const dpr = this.shoot ? Math.max(SHOOT_W / w, 1)
+                           : Math.min(devicePixelRatio || 1, 2) * this.quality;
     this.cv.width = Math.round(w * dpr);
     this.cv.height = Math.round(h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.ctx.imageSmoothingQuality = 'high';
     this.W = w;
     this.H = h;
+  }
+
+  /** Режим съёмки: холст рисуется в размер клипа (1080 по ширине). */
+  shootMode(on) {
+    if (this.shoot === on) return;
+    this.shoot = on;
+    this.resize();
   }
 
   // ---------- окно камеры ----------
@@ -150,7 +201,7 @@ export class Stage {
       return null;
     }
     const phone = this.phone;
-    const w = this.W * (phone ? 0.86 : CARD.w), h = this.H * (phone ? 0.12 : CARD.h);
+    const w = (phone ? this.safeW * 0.96 : this.W * CARD.w), h = this.H * (phone ? 0.12 : CARD.h);
     const cam = this.box(now);
     const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
     const face = { x: cam.x + cam.w / 5, y: cam.y + cam.h / 6, w: cam.w * 0.6, h: cam.h * 0.66 };
@@ -166,7 +217,7 @@ export class Stage {
       for (let k = 0; k < 3; k++) {
         const y = band + k * (h + 10);
         if (y + h > floor) break;
-        slots.push({ x: (this.W - w) / 2 + (phone ? 0 : (k % 2 ? 1 : -1) * this.W * 0.12),
+        slots.push({ x: this.midX - w / 2 + (phone ? 0 : (k % 2 ? 1 : -1) * this.W * 0.12),
                      y, w, h });
       }
     }
@@ -276,7 +327,11 @@ export class Stage {
     this.zoom += (this.zoomTarget - this.zoom) * 0.06;      // плавное приближение к лицу
     const zoom = this.zoom * this.shapeZoom() * this.punch;
     sw /= zoom; sh /= zoom;
-    const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+    if (this.follow && now - this.faceAt > 2) this.lookAt(0.5, 0.45, this.faceAt);  // лица нет — к центру
+    const fx = this.follow ? this.focus.x : 0.5;
+    const fy = this.follow ? this.focus.y : 0.5;
+    const sx = clamp(fx * vw - sw / 2, 0, vw - sw);
+    const sy = clamp(fy * vh - sh * FACE_UP, 0, vh - sh);
     // какую часть кадра видно — руки и силуэт рисуем по этим же долям, иначе будет сдвиг
     this.view = { sx: sx / vw, sy: sy / vh, sw: sw / vw, sh: sh / vh };
     const paint = (box, alpha = 1) => {
@@ -309,6 +364,7 @@ export class Stage {
       ctx.restore();
     }
     paint(cam);
+    if (this.film) this.drawFilm(ctx, cam, now);
     if (vision) vision.draw(ctx, cam, now, this.mirror, this.view);
     this.drawSparks(ctx, now);
     ctx.strokeStyle = 'rgba(189,189,189,.85)';
@@ -375,6 +431,35 @@ export class Stage {
     if (this.hearts.length > 60) this.hearts.shift();
   }
 
+  /** Плёночный вид: тёплый подтон, виньетка и зерно — кадр перестаёт быть «видеозвонком». */
+  drawFilm(ctx, cam, now) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'soft-light';          // тёплый свет, тени холоднее
+    const warm = ctx.createLinearGradient(cam.x, cam.y, cam.x, cam.y + cam.h);
+    warm.addColorStop(0, 'rgba(255,190,120,.30)');
+    warm.addColorStop(1, 'rgba(60,110,200,.22)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(cam.x, cam.y, cam.w, cam.h);
+    ctx.globalCompositeOperation = 'source-over';
+    const r = Math.hypot(cam.w, cam.h) / 2;               // виньетка
+    const vig = ctx.createRadialGradient(cam.x + cam.w / 2, cam.y + cam.h / 2, r * 0.45,
+                                         cam.x + cam.w / 2, cam.y + cam.h / 2, r);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(0,0,0,.42)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(cam.x, cam.y, cam.w, cam.h);
+    if (!this.grain) this.grain = ctx.createPattern(makeGrain(), 'repeat');   // зерно
+    if (this.grain) {                                    // плитку сдвигаем каждый кадр
+      ctx.globalAlpha = 0.06;
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.translate(-Math.random() * GRAIN, -Math.random() * GRAIN);
+      ctx.fillStyle = this.grain;
+      ctx.fillRect(cam.x, cam.y, cam.w + GRAIN, cam.h + GRAIN);
+    }
+    ctx.restore();
+    void now;
+  }
+
   ring(now, power = 1) { this.rings.push({ born: now, power }); }
 
   spawnSparks(now, power = 1) {
@@ -418,13 +503,13 @@ export class Stage {
     const fade = Math.max(0, 1 - (now - this.eqAt) / 0.6);
     if (!this.eq.length || fade <= 0) return;
     const levels = [...this.eq.slice(1).reverse(), ...this.eq];
-    const bar = this.W / levels.length;
+    const bar = this.safeW / levels.length;
     ctx.save();
     ctx.fillStyle = '#fff';
     levels.forEach((v, i) => {
       const h = 8 + 120 * v;
       ctx.globalAlpha = fade * (0.25 + 0.5 * v);
-      ctx.fillRect(i * bar + bar * 0.14, this.bottomY - h - 8, bar * 0.72, h);
+      ctx.fillRect(this.leftX + i * bar + bar * 0.14, this.bottomY - h - 8, bar * 0.72, h);
     });
     ctx.restore();
   }
@@ -521,7 +606,7 @@ export class Stage {
     ctx.textAlign = 'center';
     ctx.font = `900 ${size}px Inter, system-ui, sans-serif`;
     const fade = clamp((e.life * 1000 - age) / 250, 0, 1);
-    const maxW = this.W * 0.86;
+    const maxW = this.safeW * 0.96;
     const rows = [];
     let row = [], width = 0;
     for (const [w, at] of e.words) {
@@ -533,7 +618,7 @@ export class Stage {
     let y = Math.min(this.H * 0.68, this.bottomY - size * (rows.length - 0.2))
             - (rows.length - 1) * size * 0.6;
     for (const [cells, width] of rows) {
-      let x = this.W / 2 - width / 2;
+      let x = this.midX - width / 2;
       for (const [w, at, ww] of cells) {
         const t = age - at * 1000;
         if (t >= 0) {
@@ -563,7 +648,7 @@ export class Stage {
       ? 0.05 + 1.35 * clamp(t / 0.17, 0, 1) ** 0.45 - 0.2 * clamp((t - 0.17) / 0.1, 0, 1)
       : 0.3 + 0.95 * clamp(t / 0.12, 0, 1) - 0.15 * clamp((t - 0.12) / 0.1, 0, 1);
     ctx.globalAlpha = Math.max(0, 1 - Math.max(0, t - 0.65) / 0.35);
-    ctx.translate(this.W / 2, this.topY + (this.bottomY - this.topY) * 0.42);
+    ctx.translate(this.midX, this.topY + (this.bottomY - this.topY) * 0.42);
     ctx.scale(scale, scale);
     if (t < 0.15) {
       ctx.fillStyle = 'rgba(255,40,70,.8)';
@@ -586,7 +671,8 @@ export class Stage {
     const width = ctx.measureText(e.text).width;
     const fit = Math.min(1, (Math.min(cam.h, this.bottomY - this.topY) * 0.9) / width);
     const half = size * fit * 0.62 + 14;
-    const x = clamp(e.left ? cam.x - half : cam.x + cam.w + half, half, this.W - half)
+    const x = clamp(e.left ? cam.x - half : cam.x + cam.w + half,
+                    this.leftX + half, this.rightX - half)
               + (e.left ? -160 : 160) * slide;
     ctx.globalAlpha = fade;
     ctx.translate(x, clamp(cam.y + cam.h / 2, this.topY + 20, this.bottomY - 20));

@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v15 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v16 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -26,7 +26,8 @@ const state = {
   video: document.createElement('video'),
   stream: null,
   playing: false,
-  flags: { camera: true, hands: true, silhouette: true, beat: true, mirror: true, plates: false },
+  flags: { camera: true, hands: true, silhouette: true, beat: true, mirror: true, plates: false,
+           film: true, face: true, zones: true, mic: false },
   nextLine: 0, nextBoom: 0, lastEq: -9, lastSide: -9, side: 'right', lastWord: -9,
   moments: [],
   track: null,             // какая песня выбрана сейчас
@@ -51,10 +52,15 @@ document.querySelectorAll('.chip').forEach((chip) => {
     chip.classList.toggle('on', state.flags[flag]);
     if (flag === 'mirror') stage.mirror = state.flags.mirror;
     if (flag === 'plates') stage.plates = state.flags.plates;
+    if (flag === 'film') stage.film = state.flags.film;
+    if (flag === 'face') stage.follow = state.flags.face;
+    if (flag === 'zones') fit();
     if (flag === 'camera') state.flags.camera ? startCamera() : stopCamera();
   };
 });
 stage.mirror = state.flags.mirror;
+stage.film = state.flags.film;
+stage.follow = state.flags.face;
 
 // Подсказки: в меню — строкой, а когда меню закрыто — всплывают сверху над кадром.
 let pillTimer = null;
@@ -258,7 +264,8 @@ async function loadVision() {
   if (!state.flags.hands && !state.flags.silhouette) return;
   vision.loading = true;
   try {
-    await vision.init({ wantHands: state.flags.hands, wantSegment: state.flags.silhouette });
+    await vision.init({ wantHands: state.flags.hands, wantSegment: state.flags.silhouette,
+                        wantFace: state.flags.face });
     status('Руки и силуэт подключены.');
   } catch (err) {
     status(`Камера работает, но распознавание рук не загрузилось: ${err.message}`);
@@ -612,6 +619,7 @@ function loop() {
     if (state.flags.camera && vision.ready) {
       const cam = stage.box(now);
       for (const e of vision.process(state.video, now)) handleEvent(e, now, cam);
+      if (state.flags.face && vision.face) stage.lookAt(vision.face.x, vision.face.y, now);
     }
     const live = state.stream && state.video.readyState >= 2;
     stage.draw(now, state.flags.camera && live ? state.video : null,
@@ -672,9 +680,19 @@ function fit() {
   const top = parseFloat(probe.paddingTop) || 0;         // чёлка / строка состояния
   const bottom = parseFloat(probe.paddingBottom) || 0;   // полоса «домой»
   const bars = document.body.classList.contains('recording');
-  stage.safe = stage.phone
-    ? { top: top + 46, bottom: bottom + (bars ? 96 : 84) }   // сверху название, снизу кнопки
-    : { top: top + 16, bottom: bottom + 16 };
+  const safe = stage.phone
+    ? { top: top + 46, right: 0, bottom: bottom + (bars ? 96 : 84), left: 0 }
+    : { top: top + 16, right: 16, bottom: bottom + 16, left: 16 };
+  if (state.flags.zones && stage.phone) {        // место под кнопки и подпись самого TikTok
+    safe.right = Math.max(safe.right, stage.W * 0.17);
+    safe.left = Math.max(safe.left, stage.W * 0.04);
+    safe.bottom = Math.max(safe.bottom, stage.H * 0.19);
+    safe.top = Math.max(safe.top, stage.H * 0.11);
+  }
+  stage.safe = safe;
+  const guide = $('zones');
+  guide.classList.toggle('on', !!state.flags.zones && stage.phone);
+  guide.style.inset = `${safe.top}px ${safe.right}px ${safe.bottom}px ${safe.left}px`;
 }
 
 addEventListener('resize', fit);
@@ -722,7 +740,7 @@ function drawCount() {
   if (!rec.count) return;
   const ctx = stage.ctx, t = performance.now() / 1000 - rec.count.at;
   const k = Math.max(0, 1 - t);
-  const cx = stage.W / 2, cy = stage.topY + (stage.bottomY - stage.topY) / 2;
+  const cx = stage.midX, cy = stage.topY + (stage.bottomY - stage.topY) / 2;
   ctx.save();
   ctx.globalAlpha = 0.25 + 0.55 * k;
   ctx.strokeStyle = '#fff';
@@ -750,18 +768,22 @@ async function startRecording() {
   await goFullscreen();
   if (state.flags.camera) await startCamera();
   try { rec.wake = await navigator.wakeLock?.request('screen'); } catch { /* не дали — ладно */ }
+  stage.shootMode(true);            // рисуем в размер клипа: 1080 по ширине
+  fit();
   await countdown(3);
   if (!document.body.classList.contains('recording')) return;   // успели нажать «стоп»
   try {
     const video = $('canvas').captureStream(60).getVideoTracks();
     const audio = [];
     if (state.audio.src) audio.push(...mixer().dest.stream.getAudioTracks());
-    try {                                        // голос с микрофона — если дадут
-      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const { ctx, dest } = mixer();
-      ctx.createMediaStreamSource(micStream).connect(dest);
-      if (!audio.length) audio.push(...dest.stream.getAudioTracks());
-    } catch { /* без микрофона — тоже нормально */ }
+    if (state.flags.mic) {                       // по умолчанию выключен: он ловит песню
+      try {                                      // из динамика и портит чистую дорожку
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const { ctx, dest } = mixer();
+        ctx.createMediaStreamSource(micStream).connect(dest);
+        if (!audio.length) audio.push(...dest.stream.getAudioTracks());
+      } catch { /* не дали микрофон — пишем без него */ }
+    }
     rec.type = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm']
       .find((t) => MediaRecorder.isTypeSupported(t)) || '';
     rec.recorder = new MediaRecorder(new MediaStream([...video, ...audio]),
@@ -811,6 +833,7 @@ function exitRecording() {
   rec.wake = null;
   document.body.classList.remove('recording');
   $('recBar').hidden = true;
+  stage.shootMode(false);
   fit();
 }
 

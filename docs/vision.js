@@ -16,6 +16,7 @@ const EXTENDED = 1.15, FOLDED = 1.1, THUMB_OUT = 0.5;
 const ARM_TIME = 0.25, SHOT_KICK = 0.3, SHOT_TILT = 0.3, SHOT_WINDOW = 0.22, SHOT_COOLDOWN = 0.7;
 
 const MAX_FPS = 24;          // чаще распознавать смысла нет, а нагрузка заметная
+const FACE_FPS = 6;          // лицо не убегает — ищем его реже, чем руки
 
 /** Маска силуэта → готовая картинка (делаем один раз, а не при каждой отрисовке). */
 function maskToCanvas(data, w, h) {
@@ -208,9 +209,11 @@ export class Vision {
     this.motion = new MotionGestures();
     this.ready = false;
     this.lastVideoTime = -1;
+    this.face = null;          // {x, y} — где лицо в кадре, доли от 0 до 1
+    this.lastFace = 0;
   }
 
-  async init({ wantHands = true, wantSegment = true } = {}) {
+  async init({ wantHands = true, wantSegment = true, wantFace = true } = {}) {
     const vision = await import(`${CDN}/vision_bundle.mjs`);
     const files = await vision.FilesetResolver.forVisionTasks(`${CDN}/wasm`);
     if (wantHands) {
@@ -229,7 +232,31 @@ export class Vision {
         runningMode: 'VIDEO', outputCategoryMask: true, outputConfidenceMasks: false,
       });
     }
+    if (wantFace) {
+      this.faceFinder = await vision.FaceDetector.createFromOptions(files, {
+        baseOptions: { modelAssetPath:
+          `${MODELS}/face_detector/blaze_face_short_range/float16/latest/`
+          + 'blaze_face_short_range.tflite',
+          delegate: 'GPU' },
+        runningMode: 'VIDEO', minDetectionConfidence: 0.5,
+      });
+    }
     this.ready = true;
+  }
+
+  /** Где лицо — чтобы кадр сам держал его в центре. Ищем редко: это дёшево и хватает. */
+  findFace(video, now) {
+    if (!this.faceFinder || now - this.lastFace < 1 / FACE_FPS) return;
+    this.lastFace = now;
+    const res = this.faceFinder.detectForVideo(video, now * 1000);
+    const found = (res.detections || [])
+      .map((d) => d.boundingBox)
+      .filter(Boolean)
+      .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    this.face = found
+      ? { x: (found.originX + found.width / 2) / video.videoWidth,
+          y: (found.originY + found.height / 2) / video.videoHeight }
+      : null;
   }
 
   /** Обработать кадр: руки, силуэт, жесты. Вернёт список событий. */
@@ -260,6 +287,7 @@ export class Vision {
         mask.close();
       }
     } else this.masks = [];
+    try { this.findFace(video, now); } catch { this.face = null; }
     const gesture = this.motion.feed(video, now);
     if (gesture) events.push({ type: 'gesture', name: gesture });
     return events;
