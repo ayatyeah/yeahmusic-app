@@ -75,7 +75,13 @@
     <textarea id="lyrics" rows="5" placeholder="Текст песни, по строке на строку"
       style="width:100%;background:#12141a;color:var(--text);border:1px solid var(--line);
              border-radius:10px;padding:10px;font:inherit"></textarea>
-    <div class="row"><button id="prepareBtn">Обработать</button></div>
+    <div class="row"><button id="prepareBtn">Обработать</button>
+      <span id="serverState" class="dim" style="font-size:13px">проверяю сервер…</span></div>
+    <div class="row">
+      <input id="apiInput" placeholder="адрес сервера" spellcheck="false"
+        style="flex:1;min-width:220px;background:#12141a;color:var(--dim);
+               border:1px solid var(--line);border-radius:10px;padding:9px 10px;font:inherit">
+    </div>
   </details>
 
   <div class="row">

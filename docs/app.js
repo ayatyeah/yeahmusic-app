@@ -5,6 +5,11 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 
 const $ = (id) => document.getElementById(id);
+
+// Сервер обработки: своя страница с сервером — она же, иначе (GitHub Pages) — Railway.
+const DEFAULT_API = 'https://yeahmusic-app-production.up.railway.app';
+const api = () => (localStorage.getItem('api')
+  || (location.origin.includes('github.io') ? DEFAULT_API : location.origin)).replace(/\/$/, '');
 const stage = new Stage($('canvas'));
 const vision = new Vision();
 
@@ -71,19 +76,40 @@ $('prepareBtn').onclick = async () => {
   $('prepareBtn').disabled = true;
   status('Сервер слушает песню, это примерно минута…');
   try {
-    const res = await fetch('api/prepare', { method: 'POST', body: form });
-    if (!res.ok) throw new Error((await res.text()).slice(0, 200));
+    const res = await fetch(`${api()}/api/prepare`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`сервер ответил ${res.status}: ${(await res.text()).slice(0, 160)}`);
     state.data = await res.json();
     state.moments = findMoments(state.data.lines || []);
     const big = state.data.lines.filter((l) => l.big).length;
     status(state.data.ai
       ? `Готово: строк ${state.data.lines.length}, крупных ${big}, темп ${state.data.bpm}.`
-      : `Биты посчитаны (темп ${state.data.bpm}), но тайминги не распознать: на сервере нет ключа.`);
+      : `Биты посчитаны (темп ${state.data.bpm}), но тайминги не распознаны: на сервере нет ключа `
+        + 'OpenAI. Добавь его в Railway → Variables → OPENAI_API_KEY.');
   } catch (err) {
     status(`Сервер не справился: ${err.message}`);
   }
   $('prepareBtn').disabled = false;
 };
+
+/** Жив ли сервер и видит ли он ключ OpenAI. */
+async function checkServer() {
+  $('apiInput').value = api();
+  try {
+    const res = await fetch(`${api()}/health`, { cache: 'no-store' });
+    const data = await res.json();
+    $('serverState').textContent = data.ai
+      ? '✅ сервер на связи, ИИ включён'
+      : '⚠️ сервер на связи, но ключа OpenAI нет — будут только биты';
+  } catch {
+    $('serverState').textContent = '❌ сервер не отвечает — проверь адрес';
+  }
+}
+
+$('apiInput').onchange = () => {
+  localStorage.setItem('api', $('apiInput').value.trim() || DEFAULT_API);
+  checkServer();
+};
+checkServer();
 
 $('demoBtn').onclick = () => {
   state.data = null;
