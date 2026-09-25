@@ -14,7 +14,7 @@ const state = {
   video: document.createElement('video'),
   stream: null,
   playing: false,
-  flags: { camera: true, hands: true, silhouette: true, beat: true, mirror: true },
+  flags: { camera: true, hands: true, silhouette: true, beat: true, mirror: true, box: false },
   nextLine: 0, nextBoom: 0, lastEq: -9, lastSide: -9, side: 'right', lastWord: -9,
   moments: [],
 };
@@ -31,6 +31,7 @@ document.querySelectorAll('.chip').forEach((chip) => {
     state.flags[flag] = !state.flags[flag];
     chip.classList.toggle('on', state.flags[flag]);
     if (flag === 'mirror') stage.mirror = state.flags.mirror;
+    if (flag === 'box') stage.box = state.flags.box;
     if (flag === 'camera') state.flags.camera ? startCamera() : stopCamera();
   };
 });
@@ -168,6 +169,8 @@ function timeline(songTime, now) {
     state.nextLine++;
     if (line.frame) stage.setShape(line.frame, now);
     stage.addCard(line.text, duration, 1, now, line.big);
+    const stars = line.text.indexOf('***');        // «****» — цензурный писк
+    if (stars >= 0) setTimeout(() => sound('bleep'), stars * 85);
     if (line.big) vision.flashOutline(now);
     const word = line.word || pickWord(line.text);
     if (word && !line.big && now - state.lastWord > 4) {
@@ -212,12 +215,21 @@ function pickWord(text, min = 4) {
 
 // ---------- жесты ----------
 
+const onCam = (cam, p) => [cam.x + (state.flags.mirror ? 1 - p[0] : p[0]) * cam.w,
+                           cam.y + p[1] * cam.h];
+
 function handleEvent(e, now, cam) {
   if (e.type === 'shot') {
-    const x = cam.x + (state.flags.mirror ? 1 - e.muzzle[0] : e.muzzle[0]) * cam.w;
-    const y = cam.y + e.muzzle[1] * cam.h;
+    const [x, y] = onCam(cam, e.muzzle);
     const dir = [state.flags.mirror ? -e.dir[0] : e.dir[0], e.dir[1]];
     stage.shot(x, y, dir, now);
+    stage.spark(x, y, now);
+    sound('shot');
+    return;
+  }
+  if (e.type === 'heart') {
+    const [x, y] = onCam(cam, e.point);
+    for (let i = 0; i < 2; i++) stage.heart(x, y);
     return;
   }
   const name = e.name;
@@ -230,6 +242,41 @@ function handleEvent(e, now, cam) {
   else if (name === 'right') stage.jump([1, 0], now);
 }
 
+// ---------- звуки (синтез, без файлов) ----------
+
+let actx = null;
+function sound(kind) {
+  actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+  const t = actx.currentTime;
+  if (kind === 'shot') {                       // выстрел: щелчок шума + низкий удар
+    const n = actx.sampleRate * 0.4;
+    const buf = actx.createBuffer(1, n, actx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) {
+      const k = i / actx.sampleRate;
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-k * 28)
+              + Math.sin(2 * Math.PI * (95 - 50 * k) * k) * Math.exp(-k * 14) * 0.8;
+    }
+    const src = actx.createBufferSource();
+    const gain = actx.createGain();
+    gain.gain.value = 0.8;
+    src.buffer = buf;
+    src.connect(gain).connect(actx.destination);
+    src.start();
+  } else {                                     // цензурный «пи-ип»
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.frequency.value = 1000;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+    gain.gain.setValueAtTime(0.25, t + 0.45);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    osc.connect(gain).connect(actx.destination);
+    osc.start(t);
+    osc.stop(t + 0.5);
+  }
+}
+
 // ---------- главный цикл ----------
 
 function loop() {
@@ -237,6 +284,7 @@ function loop() {
   const songTime = state.audio.currentTime;
   if (state.playing) timeline(songTime, now);
   vision.segment = state.flags.silhouette && vision.ready && inMoment(songTime);
+  stage.zoomTarget = inMoment(songTime) ? 1.3 : 1;      // в особом моменте — ближе к лицу
   if (state.flags.camera && vision.ready) {
     const cam = stage.box(now);
     for (const e of vision.process(state.video, now)) handleEvent(e, now, cam);

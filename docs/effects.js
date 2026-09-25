@@ -30,6 +30,11 @@ export class Stage {
     this.frames = [];           // недавние кадры камеры — для «эха» на дропе
     this.ghosts = [];           // недавние положения окна — след при полёте
     this.mirror = true;
+    this.box = false;            // «плашки»: светлый фон под строкой, как в программе
+    this.zoom = 1;               // приближение кадра (в особых моментах)
+    this.zoomTarget = 1;
+    this.flashes = [];           // вспышки у пальца при выстреле
+    this.hearts = [];
   }
 
   resize() {
@@ -219,6 +224,8 @@ export class Stage {
     const aspect = cam.w / cam.h;                  // обрезаем кадр под форму окна
     let sw = vw, sh = vh;
     if (vw / vh > aspect) sw = vh * aspect; else sh = vw / aspect;
+    this.zoom += (this.zoomTarget - this.zoom) * 0.06;      // плавное приближение к лицу
+    sw /= this.zoom; sh /= this.zoom;
     const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
     const paint = (box, alpha = 1) => {
       ctx.save();
@@ -251,6 +258,7 @@ export class Stage {
     }
     paint(cam);
     if (vision) vision.draw(ctx, cam, now, this.mirror);
+    this.drawSparks(ctx, now);
     ctx.strokeStyle = 'rgba(189,189,189,.85)';
     ctx.lineWidth = 1;
     ctx.strokeRect(cam.x + 0.5, cam.y + 0.5, cam.w - 1, cam.h - 1);
@@ -258,6 +266,61 @@ export class Stage {
       this.ghosts = [{ box: { ...cam }, alpha: 0.35 }, ...this.ghosts].slice(0, 3)
         .map((g, i) => ({ ...g, alpha: 0.32 - i * 0.1 }));
     } else this.ghosts = [];
+  }
+
+  /** Вспышка у кончика пальца в момент выстрела и летящие сердечки. */
+  drawSparks(ctx, now) {
+    this.flashes = this.flashes.filter((f) => now - f.born < 0.2);
+    for (const f of this.flashes) {
+      const k = 1 - (now - f.born) / 0.2;
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.fillStyle = `rgba(255,200,60,${k})`;
+      ctx.beginPath();
+      for (let i = 0; i < 24; i++) {
+        const a = Math.PI * i / 12;
+        const r = (i % 2 ? 22 * k + 4 : 60 * k + 10);
+        ctx[i ? 'lineTo' : 'moveTo'](Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = `rgba(255,255,230,${k})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, 18 * k + 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    const dt = 1 / 60;
+    this.hearts = this.hearts.filter((h) => (h.age += dt) < h.life);
+    for (const h of this.hearts) {
+      h.x += h.vx * dt; h.y += h.vy * dt; h.vx += (Math.random() - 0.5) * 60 * dt;
+      const k = Math.min(1, h.age * 8) * (1 - Math.max(0, h.age - h.life * 0.6) / (h.life * 0.4));
+      const r = h.size * (0.6 + 0.4 * Math.min(1, h.age * 5));
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, k);
+      ctx.fillStyle = h.color;
+      ctx.beginPath();
+      for (let i = 0; i <= 32; i++) {                       // контур сердечка
+        const t = Math.PI * 2 * i / 32;
+        const x = 16 * Math.sin(t) ** 3;
+        const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+        ctx[i ? 'lineTo' : 'moveTo'](h.x + x * r / 16, h.y + y * r / 16);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  spark(x, y, now) { this.flashes.push({ x, y, born: now }); }
+
+  heart(x, y) {
+    const colors = ['#ff3c6e', '#ff6ea0', '#f01e46'];
+    this.hearts.push({ x: x + (Math.random() - 0.5) * 20, y: y + (Math.random() - 0.5) * 20,
+      vx: (Math.random() - 0.5) * 240, vy: -120 - Math.random() * 140,
+      size: 12 + Math.random() * 14, age: 0, life: 1.2 + Math.random() * 0.8,
+      color: colors[Math.floor(Math.random() * 3)] });
+    if (this.hearts.length > 60) this.hearts.shift();
   }
 
   drawEq(ctx, now) {
@@ -317,6 +380,17 @@ export class Stage {
       ctx.translate(kick[0], kick[1]);
       ctx.font = `700 ${size}px Inter, system-ui, sans-serif`;
       const lines = this.wrap(ctx, card.text, card.w - 30);
+      if (this.box) {                       // светлая плашка под текстом
+        const h = lines.length * size * 1.2 + 26, w = card.w;
+        const x = card.x, y = card.y + card.h / 2 - h / 2;
+        ctx.fillStyle = '#ececec';
+        ctx.strokeStyle = '#bdbdbd';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 8);
+        ctx.fill();
+        ctx.stroke();
+      }
       const lineH = size * 1.2;
       let left = shown;
       let y = card.y + card.h / 2 - (lines.length - 1) * lineH / 2;
@@ -335,7 +409,8 @@ export class Stage {
           ctx.fillText(part, x + 5, y);
           ctx.restore();
         }
-        this.outlineText(ctx, part + cursor, x, y, ctx.font, '#fff', 'rgba(0,0,0,.92)', 6);
+        if (this.box) { ctx.fillStyle = '#141414'; ctx.fillText(part + cursor, x, y); }
+        else this.outlineText(ctx, part + cursor, x, y, ctx.font, '#fff', 'rgba(0,0,0,.92)', 6);
         y += lineH;
         if (left < 0) break;
       }

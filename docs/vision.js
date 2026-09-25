@@ -76,6 +76,18 @@ class GunDetector {
   }
 }
 
+/** Сердечко из двух рук: указательные сведены вверху, большие — внизу. */
+function heartCenter(hands) {
+  if (hands.length < 2) return null;
+  const [a, b] = hands;
+  const size = (palm(a) + palm(b)) / 2;
+  if (dist(a[8], b[8]) > 0.5 * size || dist(a[4], b[4]) > 0.5 * size) return null;
+  const top = [(a[8][0] + b[8][0]) / 2, (a[8][1] + b[8][1]) / 2];
+  const bottom = [(a[4][0] + b[4][0]) / 2, (a[4][1] + b[4][1]) / 2];
+  if (top[1] > bottom[1] - 0.3 * size) return null;
+  return [(top[0] + bottom[0]) / 2, (top[1] + bottom[1]) / 2];
+}
+
 // ---------- взмахи и ладонь (по движению в кадре) ----------
 
 class MotionGestures {
@@ -210,9 +222,12 @@ export class Vision {
     if (this.landmarker) {
       const res = this.landmarker.detectForVideo(video, ms);
       this.hands = (res.landmarks || []).map((pts) => pts.map((p) => [p.x, p.y]));
-      const shot = this.gun.feed(this.hands.map((p) => p.map(([x, y]) => [x * 1000, y * 1000])), now);
+      const big = this.hands.map((p) => p.map(([x, y]) => [x * 1000, y * 1000]));
+      const shot = this.gun.feed(big, now);
       if (shot) events.push({ type: 'shot', muzzle: shot.muzzle.map((v) => v / 1000),
                               dir: shot.dir });
+      const heart = heartCenter(big);
+      if (heart) events.push({ type: 'heart', point: heart.map((v) => v / 1000) });
     }
     if (this.segment && this.segmenter) {
       const res = this.segmenter.segmentForVideo(video, ms);
