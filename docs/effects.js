@@ -302,8 +302,7 @@ export class Stage {
       ctx.beginPath();
       ctx.rect(cam.x + cam.w / 2, cam.y, cam.w / 2, cam.h);
       ctx.clip();
-      ctx.translate(cam.x * 2 + cam.w, 0);
-      ctx.scale(-1, 1);
+      if (!this.mirror) { ctx.translate(cam.x * 2 + cam.w, 0); ctx.scale(-1, 1); }
       ctx.drawImage(video, sx, sy, sw, sh, cam.x, cam.y, cam.w, cam.h);
       ctx.restore();
     }

@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v11 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v12 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -345,6 +345,8 @@ function timeline(songTime, now) {
     const moment = inMoment(songTime);
     stage.boom(moment ? Math.min(1, s * 1.15) : s * 0.75, moment ? (i % 2 ? 1 : -1) : 0, now);
     if (s >= 0.5) stage.push(s, now);
+    if (s >= 0.7) stage.ring(now, s);                 // волна от сильного удара
+    if (moment) stage.spawnSparks(now, s);            // искры в особом моменте
     if (moment && s >= 0.85) stage.glitch(140, now);
   }
   const levels = data.levels || [];
@@ -383,7 +385,7 @@ function handleEvent(e, now, cam) {
   const name = e.name;
   if (name === 'cover') {
     if (state.audio.paused) state.audio.play(); else state.audio.pause();
-  } else if (name === 'wave') stage.shake(1, now);
+  } else if (name === 'wave') { stage.shake(1, now); stage.split(now); }
   else if (name === 'up') stage.jump([0, 1], now);
   else if (name === 'down') stage.jump([0, -1], now);
   else if (name === 'left') stage.jump([-1, 0], now);
@@ -469,6 +471,7 @@ $('demoBtn').onclick = () => {
       stage.boom(0.9, i % 2 ? 1 : -1, t);
       stage.push(0.8, t);
       if (i % 4 === 3) stage.glitch(160, t);
+      if (i % 3 === 0) { stage.ring(t, 1); stage.spawnSparks(t, 1.5); }
       stage.setEq([0.9, 0.7, 0.5, 0.3, 0.15].map((v) => v * (0.5 + Math.random() / 2)), t);
     }, 400 + i * 500);
   }
@@ -480,7 +483,10 @@ $('demoBtn').onclick = () => {
     stage.spark(x, y, t);
     sound('shot');
   }, 3200);
-  setTimeout(() => { const t = performance.now() / 1000; stage.flash(t); stage.clones(t); }, 5200);
+  setTimeout(() => {
+    const t = performance.now() / 1000;
+    stage.flash(t); stage.clones(t); stage.ring(t, 1); stage.split(t);
+  }, 5200);
   void now;
 };
 
