@@ -30,7 +30,8 @@ export class Stage {
     this.frames = [];           // недавние кадры камеры — для «эха» на дропе
     this.ghosts = [];           // недавние положения окна — след при полёте
     this.mirror = true;
-    this.box = false;            // «плашки»: светлый фон под строкой, как в программе
+    this.plates = false;         // «плашки»: светлый фон под строкой, как в программе
+                                 // (не box — так называется метод, считающий окно камеры)
     this.zoom = 1;               // приближение кадра (в особых моментах)
     this.zoomTarget = 1;
     this.flashes = [];           // вспышки у пальца при выстреле
@@ -108,7 +109,7 @@ export class Stage {
 
   // ---------- строки ----------
 
-  addCard(text, duration, speed, now, big = false, box = false) {
+  addCard(text, duration, speed, now, big = false) {
     const ms = Math.max(Math.min(MIN_CHAR_MS, CHAR_MS / speed),
                         Math.min(CHAR_MS / speed, duration * 850 / Math.max(text.length, 1)));
     if (big) {                                    // крупно по центру, слово за словом
@@ -380,7 +381,7 @@ export class Stage {
       ctx.translate(kick[0], kick[1]);
       ctx.font = `700 ${size}px Inter, system-ui, sans-serif`;
       const lines = this.wrap(ctx, card.text, card.w - 30);
-      if (this.box) {                       // светлая плашка под текстом
+      if (this.plates) {                    // светлая плашка под текстом
         const h = lines.length * size * 1.2 + 26, w = card.w;
         const x = card.x, y = card.y + card.h / 2 - h / 2;
         ctx.fillStyle = '#ececec';
@@ -409,7 +410,7 @@ export class Stage {
           ctx.fillText(part, x + 5, y);
           ctx.restore();
         }
-        if (this.box) { ctx.fillStyle = '#141414'; ctx.fillText(part + cursor, x, y); }
+        if (this.plates) { ctx.fillStyle = '#141414'; ctx.fillText(part + cursor, x, y); }
         else this.outlineText(ctx, part + cursor, x, y, ctx.font, '#fff', 'rgba(0,0,0,.92)', 6);
         y += lineH;
         if (left < 0) break;

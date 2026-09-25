@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v5 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v6 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -26,7 +26,7 @@ const state = {
   video: document.createElement('video'),
   stream: null,
   playing: false,
-  flags: { camera: true, hands: true, silhouette: true, beat: true, mirror: true, box: false },
+  flags: { camera: true, hands: true, silhouette: true, beat: true, mirror: true, plates: false },
   nextLine: 0, nextBoom: 0, lastEq: -9, lastSide: -9, side: 'right', lastWord: -9,
   moments: [],
   track: null,             // какая песня выбрана сейчас
@@ -47,7 +47,7 @@ document.querySelectorAll('.chip').forEach((chip) => {
     state.flags[flag] = !state.flags[flag];
     chip.classList.toggle('on', state.flags[flag]);
     if (flag === 'mirror') stage.mirror = state.flags.mirror;
-    if (flag === 'box') stage.box = state.flags.box;
+    if (flag === 'plates') stage.plates = state.flags.plates;
     if (flag === 'camera') state.flags.camera ? startCamera() : stopCamera();
   };
 });
