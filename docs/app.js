@@ -357,6 +357,46 @@ function handleEvent(e, now, cam) {
   else if (name === 'right') stage.jump([1, 0], now);
 }
 
+// ---------- проверка эффектов без песни ----------
+
+const DEMO_LINES = ['Проверка строки раз', 'Вторая строка подлиннее, с переносом',
+                    'Третья строка', 'И ещё одна для счёта'];
+
+$('demoBtn').onclick = () => {
+  const now = performance.now() / 1000;
+  stage.cards = [];
+  stage.effects = [];
+  status('Проверка: строки, плашки, бум, глитч и выстрел. Плашки включаются кнопкой «Плашки».');
+  $('panel').classList.add('hidden');
+  DEMO_LINES.forEach((text, i) => {
+    setTimeout(() => {
+      const t = performance.now() / 1000;
+      stage.addCard(text, 2.4, 1, t, i === 2);       // третью показываем крупно по центру
+      if (i === 1) stage.word('ПРОВЕРКА', true, t);
+      if (i === 3) stage.sideWord('СБОКУ', true, t);
+    }, i * 1600);
+  });
+  for (let i = 0; i < 12; i++) {                      // удары, как под бит
+    setTimeout(() => {
+      const t = performance.now() / 1000;
+      stage.boom(0.9, i % 2 ? 1 : -1, t);
+      stage.push(0.8, t);
+      if (i % 4 === 3) stage.glitch(160, t);
+      stage.setEq([0.9, 0.7, 0.5, 0.3, 0.15].map((v) => v * (0.5 + Math.random() / 2)), t);
+    }, 400 + i * 500);
+  }
+  setTimeout(() => {                                  // выстрел со всеми эффектами
+    const t = performance.now() / 1000;
+    const cam = stage.box(t);
+    const x = cam.x + cam.w * 0.6, y = cam.y + cam.h * 0.5;
+    stage.shot(x, y, [1, -0.15], t);
+    stage.spark(x, y, t);
+    sound('shot');
+  }, 3200);
+  setTimeout(() => { const t = performance.now() / 1000; stage.flash(t); stage.clones(t); }, 5200);
+  void now;
+};
+
 // ---------- звуки (синтез, без файлов) ----------
 
 let actx = null;
