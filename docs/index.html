@@ -10,131 +10,188 @@
 <link rel="apple-touch-icon" href="icon.png">
 <title>YeahMusic</title>
 <style>
-  :root { --bg:#101113; --panel:#181a1e; --card:#1f232a; --line:#2a2e35; --text:#e6e6e6;
-          --dim:#8a8f98; --accent:#5b6cff; }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root { --bg:#0e0f12; --panel:#15171c; --card:#1f232a; --line:#2a2e35; --text:#e9e9ea;
+          --dim:#8a8f98; --accent:#5b6cff; --rec:#ff4d4d;
+          --top:env(safe-area-inset-top); --bottom:env(safe-area-inset-bottom); }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overflow:hidden; }
   body { margin:0; background:var(--bg); color:var(--text);
          font:15px/1.45 Inter, system-ui, sans-serif; overscroll-behavior:none;
          position:fixed; inset:0; touch-action:manipulation; }
   canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
 
-  #panel { position:fixed; inset:auto 0 0 0; z-index:5; background:var(--panel);
-           border-top:1px solid var(--line); border-radius:18px 18px 0 0;
-           padding:10px 16px calc(16px + env(safe-area-inset-bottom));
-           max-height:78vh; overflow:auto; transition:transform .25s ease; }
-  #panel.hidden { transform:translateY(calc(100% - 64px)); }
-  #grip { width:44px; height:5px; border-radius:99px; background:#343a44; margin:2px auto 10px; }
+  /* невидимая метка: по ней узнаём высоту «чёлки» и нижней полосы телефона */
+  #safe { position:fixed; top:0; left:0; width:0; height:0; pointer-events:none;
+          padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }
 
-  h1 { margin:0; font-size:19px; }
-  h2 { margin:18px 0 8px; font-size:13px; color:var(--dim); font-weight:600;
+  .pill { background:rgba(18,19,23,.72); backdrop-filter:blur(10px); border-radius:99px;
+          padding:7px 13px; font-size:13px; }
+
+  /* строка поверх кадра — под «чёлкой» */
+  #top { position:fixed; left:0; right:0; top:calc(var(--top) + 8px); z-index:4;
+         display:flex; gap:8px; justify-content:center; pointer-events:none; }
+  #nowPlaying { max-width:70vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #nowPlaying:empty { display:none; }
+
+  /* нижняя панель управления — над полосой «домой» */
+  #bar { position:fixed; left:0; right:0; bottom:0; z-index:5;
+         display:flex; gap:6px; justify-content:space-around;
+         padding:8px 10px calc(8px + var(--bottom));
+         background:linear-gradient(to top, rgba(10,11,13,.92), rgba(10,11,13,0)); }
+  #bar button { flex:1; background:rgba(31,35,42,.82); backdrop-filter:blur(10px); border:0;
+                color:var(--text); border-radius:16px; padding:9px 4px 7px; font:inherit;
+                display:flex; flex-direction:column; align-items:center; gap:2px; }
+  #bar button b { font-size:19px; font-weight:400; line-height:1.1; }
+  #bar button span { font-size:11px; color:var(--dim); }
+  #bar button.on { background:var(--accent); }
+  #bar button.on span { color:#dfe3ff; }
+  #bar button.rec b { color:var(--rec); }
+
+  /* отдельный режим записи: ничего лишнего, только время и стоп */
+  #recBar { position:fixed; left:0; right:0; bottom:0; z-index:6;
+            display:flex; align-items:center; justify-content:center; gap:14px;
+            padding:12px 16px calc(14px + var(--bottom)); }
+  #recTime { font-variant-numeric:tabular-nums; font-weight:600; color:#fff;
+             background:rgba(18,19,23,.72); backdrop-filter:blur(10px);
+             border-radius:99px; padding:9px 15px; }
+  #recTime::before { content:'●'; color:var(--rec); margin-right:7px;
+                     animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:.25; } }
+  #recStop { width:62px; height:62px; border-radius:99px; border:4px solid rgba(255,255,255,.85);
+             background:var(--rec); color:transparent; font-size:1px; }
+  body.recording #bar, body.recording #top { display:none; }
+
+  /* меню-шторка */
+  #sheet { position:fixed; inset:auto 0 0 0; z-index:7; background:var(--panel);
+           border-top:1px solid var(--line); border-radius:20px 20px 0 0;
+           padding:8px 16px calc(18px + var(--bottom));
+           max-height:82vh; overflow:auto; transform:translateY(0);
+           transition:transform .25s ease; }
+  #sheet.hidden { transform:translateY(105%); }
+  #grip { width:42px; height:5px; border-radius:99px; background:#343a44; margin:2px auto 12px; }
+  .tabs { display:flex; gap:6px; background:#12141a; border-radius:14px; padding:4px;
+          margin-bottom:14px; }
+  .tab { flex:1; background:transparent; border:0; color:var(--dim); font:inherit;
+         padding:9px 4px; border-radius:11px; }
+  .tab.on { background:var(--card); color:var(--text); font-weight:600; }
+  .page[hidden] { display:none; }
+
+  h2 { margin:16px 0 8px; font-size:12px; color:var(--dim); font-weight:600;
        text-transform:uppercase; letter-spacing:.06em; }
+  h2:first-child { margin-top:2px; }
   .dim { color:var(--dim); font-size:13px; }
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .grow { flex:1 1 auto; }
 
-  button, label.file { background:var(--card); color:var(--text); border:0; border-radius:12px;
-           padding:12px 15px; font:inherit; display:inline-flex; gap:7px; align-items:center; }
+  button, label.file { background:var(--card); color:var(--text); border:0; border-radius:13px;
+           padding:13px 15px; font:inherit; display:inline-flex; gap:7px; align-items:center;
+           justify-content:center; }
   button.accent { background:var(--accent); color:#fff; font-weight:600; }
   button.ghost { background:transparent; border:1px solid var(--line); }
   button:disabled { opacity:.4; }
   label.file input { display:none; }
 
-  .chip { background:var(--card); border-radius:99px; padding:8px 13px; font-size:13px;
+  .chip { background:var(--card); border-radius:99px; padding:9px 14px; font-size:13px;
           color:var(--dim); user-select:none; }
   .chip.on { background:var(--accent); color:#fff; }
 
-  .track { display:flex; align-items:center; gap:10px; background:var(--card); border-radius:12px;
+  .track { display:flex; align-items:center; gap:10px; background:var(--card); border-radius:13px;
            padding:11px 12px; margin-bottom:8px; }
   .track.active { outline:2px solid var(--accent); }
   .track .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .track .meta { font-size:12px; color:var(--dim); }
-  .track button { padding:8px 11px; background:#282d36; }
+  .track button { padding:9px 12px; background:#282d36; }
   .empty { color:var(--dim); font-size:13px; padding:10px 0 4px; }
 
-  #status { color:var(--dim); font-size:13px; min-height:18px; margin-top:10px; }
-  #hud { position:fixed; top:calc(10px + env(safe-area-inset-top)); left:0; right:0; z-index:4;
-         display:flex; gap:8px; justify-content:center; pointer-events:none; }
-  #hud button { pointer-events:auto; background:rgba(20,20,24,.72); backdrop-filter:blur(8px);
-                padding:9px 13px; }
-  #rec { color:#ff5b5b; font-weight:600; align-self:center; }
-  input[type=text], textarea { width:100%; background:#12141a; color:var(--text);
-           border:1px solid var(--line); border-radius:11px; padding:10px; font:inherit; }
-  details summary { cursor:pointer; color:var(--dim); font-size:13px; margin:14px 0 6px; }
+  #status { color:var(--dim); font-size:13px; min-height:18px; margin-top:14px; }
+  #status:empty { display:none; }
+  input[type=text], input[type=password], textarea { width:100%; background:#12141a;
+           color:var(--text); border:1px solid var(--line); border-radius:12px; padding:11px;
+           font:inherit; }
 </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
+<div id="safe"></div>
 
-<div id="hud">
-  <button id="showPanel">☰</button>
-  <button id="recBtn">● Запись</button>
-  <span id="rec"></span>
+<div id="top">
+  <span id="nowPlaying" class="pill"></span>
 </div>
 
-<div id="panel">
+<div id="bar">
+  <button id="menuBtn"><b>☰</b><span>Меню</span></button>
+  <button id="playBtn"><b>▶</b><span>Показ</span></button>
+  <button id="recBtn" class="rec"><b>⏺</b><span>Запись</span></button>
+  <button id="camBtn"><b>📷</b><span>Камера</span></button>
+</div>
+
+<div id="recBar" hidden>
+  <span id="recTime">00:00</span>
+  <button id="recStop">стоп</button>
+</div>
+
+<div id="sheet" class="hidden">
   <div id="grip"></div>
-  <div class="row">
-    <h1 class="grow">YeahMusic</h1>
-    <button id="installBtn" class="ghost" hidden>⤓ Установить</button>
+  <div class="tabs">
+    <button class="tab on" data-tab="songs">Песни</button>
+    <button class="tab" data-tab="fx">Эффекты</button>
+    <button class="tab" data-tab="more">Ещё</button>
   </div>
 
-  <h2>Мои песни</h2>
-  <div id="tracks"></div>
-  <div class="row">
-    <label class="file grow">＋ Добавить песню<input id="audioFile" type="file" accept="audio/*"></label>
-    <label class="file">📄 Разметка<input id="dataFile" type="file" accept=".json,application/json"></label>
+  <div class="page" data-page="songs">
+    <div id="tracks"></div>
+    <div class="row">
+      <label class="file grow">＋ Добавить песню<input id="audioFile" type="file" accept="audio/*"></label>
+      <label class="file">📄 Разметка<input id="dataFile" type="file" accept=".json,application/json"></label>
+    </div>
+    <h2>Разметка на сервере</h2>
+    <p class="dim">Вставь текст песни — сервер услышит тайминги, посчитает биты и решит,
+      какие строки показать крупно.</p>
+    <textarea id="lyrics" rows="4" placeholder="Текст песни, по строке на строку"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button id="prepareBtn" class="grow accent">🤖 Обработать</button>
+    </div>
   </div>
 
-  <h2>Показ</h2>
-  <div class="row">
-    <button id="startBtn" class="accent grow">▶ Показать</button>
-    <button id="stopBtn" disabled>■ Стоп</button>
-    <button id="camBtn">📷 Камера</button>
-    <button id="demoBtn">✨ Проверка эффектов</button>
-    <button id="fullBtn">⛶ Во весь экран</button>
+  <div class="page" data-page="fx" hidden>
+    <h2>Что показывать</h2>
+    <div class="row">
+      <span class="chip on" data-flag="camera">Камера</span>
+      <span class="chip on" data-flag="hands">Руки</span>
+      <span class="chip on" data-flag="silhouette">Силуэт</span>
+      <span class="chip on" data-flag="beat">Бит</span>
+      <span class="chip" data-flag="plates">Плашки</span>
+      <span class="chip" data-flag="mirror">Зеркало</span>
+    </div>
+    <h2>Проверить</h2>
+    <div class="row">
+      <button id="demoBtn" class="grow">✨ Показать все эффекты</button>
+      <button id="fullBtn">⛶ Во весь экран</button>
+    </div>
   </div>
 
-  <h2>Эффекты</h2>
-  <div class="row">
-    <span class="chip on" data-flag="camera">Камера</span>
-    <span class="chip on" data-flag="hands">Руки</span>
-    <span class="chip on" data-flag="silhouette">Силуэт</span>
-    <span class="chip on" data-flag="beat">Бит</span>
-    <span class="chip" data-flag="plates">Плашки</span>
-    <span class="chip" data-flag="mirror">Зеркало</span>
-  </div>
-
-  <details>
-    <summary>☁️ Песни с сервера</summary>
+  <div class="page" data-page="more" hidden>
+    <h2>Песни с сервера</h2>
     <p class="dim">Личное хранилище: песни видно только по ключу. Скачанная песня остаётся
       в телефоне и работает без сети.</p>
-    <div class="row">
-      <input id="keyInput" type="password" placeholder="ключ хранилища" spellcheck="false">
-    </div>
+    <input id="keyInput" type="password" placeholder="ключ хранилища" spellcheck="false">
     <div class="row" style="margin-top:8px">
-      <button id="cloudBtn" class="grow">Показать песни на сервере</button>
+      <button id="cloudBtn" class="grow">☁️ Посмотреть, что на сервере</button>
     </div>
     <div id="cloud"></div>
-  </details>
-
-  <details>
-    <summary>🤖 Разметка песни на сервере</summary>
-    <p class="dim">Вставь текст песни — сервер услышит тайминги, посчитает биты и решит,
-      какие строки показать крупно. Песня на сервере не сохраняется.</p>
-    <textarea id="lyrics" rows="5" placeholder="Текст песни, по строке на строку"></textarea>
-    <div class="row" style="margin-top:8px">
-      <button id="prepareBtn" class="grow">Обработать</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <span id="serverState" class="dim">проверяю сервер…</span>
-    </div>
+    <h2>Сервер</h2>
+    <div class="row"><span id="serverState" class="dim">проверяю сервер…</span></div>
     <div class="row" style="margin-top:8px">
       <input id="apiInput" type="text" placeholder="адрес сервера" spellcheck="false">
     </div>
-  </details>
+    <h2>Приложение</h2>
+    <div class="row">
+      <button id="installBtn" class="ghost grow" hidden>⤓ Установить на телефон</button>
+      <span id="version" class="dim"></span>
+    </div>
+  </div>
 
-  <div id="status">Добавь песню — она сохранится здесь и будет под рукой.</div>
+  <div id="status"></div>
 </div>
 
 <script type="module" src="app.js"></script>

@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v12 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v13 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -53,7 +53,21 @@ document.querySelectorAll('.chip').forEach((chip) => {
 });
 stage.mirror = state.flags.mirror;
 
-const status = (text) => { $('status').textContent = text; };
+// Подсказки: в меню — строкой, а когда меню закрыто — всплывают сверху над кадром.
+let pillTimer = null;
+
+function pill(text, ms = 4000) {
+  $('nowPlaying').textContent = text;
+  clearTimeout(pillTimer);
+  if (ms) pillTimer = setTimeout(() => {
+    $('nowPlaying').textContent = state.track ? state.track.name : '';
+  }, ms);
+}
+
+const status = (text) => {
+  $('status').textContent = text;
+  if (text && $('sheet').classList.contains('hidden')) pill(text);
+};
 
 // ---------- файлы ----------
 
@@ -91,6 +105,7 @@ function applyData(data) {
 
 async function loadTrack(item) {
   state.track = item;
+  pill(item.name, 0);
   state.audio.src = URL.createObjectURL(item.audio);
   if (item.data) applyData(item.data); else { state.data = null; state.moments = []; }
   await renderTracks();
@@ -284,26 +299,50 @@ async function start() {
   state.audio.currentTime = 0;
   await state.audio.play();
   state.playing = true;
-  $('stopBtn').disabled = false;
-  $('panel').classList.add('hidden');
+  setPlay(true);
+  closeSheet();
   status(state.data ? '' : 'Показ без разметки: только камера и жесты.');
 }
 
-$('startBtn').onclick = start;
-
-$('stopBtn').onclick = () => {
+function stopShow() {
   state.playing = false;
   state.audio.pause();
-  $('stopBtn').disabled = true;
-  $('panel').classList.remove('hidden');
-};
+  setPlay(false);
+}
 
-$('showPanel').onclick = () => $('panel').classList.toggle('hidden');
-$('grip').onclick = () => $('panel').classList.toggle('hidden');
+// ---------- нижняя панель и меню ----------
+
+const sheet = $('sheet');
+const closeSheet = () => sheet.classList.add('hidden');
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === name));
+  document.querySelectorAll('.page').forEach((p) => { p.hidden = p.dataset.page !== name; });
+}
+document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => showTab(t.dataset.tab); });
+
+/** Кнопка нижней панели: значок, подпись и «горит ли». */
+function setBtn(id, icon, label, on = false) {
+  const b = $(id);
+  b.querySelector('b').textContent = icon;
+  b.querySelector('span').textContent = label;
+  b.classList.toggle('on', on);
+}
+
+const setPlay = (playing) => setBtn('playBtn', playing ? '■' : '▶',
+                                    playing ? 'Стоп' : 'Показ', playing);
+const setCam = (on) => setBtn('camBtn', '📷', on ? 'Выключить' : 'Камера', on);
+
+$('menuBtn').onclick = () => sheet.classList.toggle('hidden');
+$('grip').onclick = closeSheet;
+$('playBtn').onclick = () => (state.playing ? stopShow() : start());
 $('camBtn').onclick = async () => {
-  if (state.stream) { stopCamera(); $('camBtn').textContent = '📷 Включить камеру'; return; }
-  if (await startCamera()) $('camBtn').textContent = '📷 Выключить камеру';
+  if (state.stream) { stopCamera(); setCam(false); return; }
+  setCam(await startCamera());
 };
+$('version').textContent = VERSION;
+setPlay(false);
+setCam(false);
 
 /** Что должно случиться к этому моменту песни. */
 function timeline(songTime, now) {
@@ -456,7 +495,7 @@ $('demoBtn').onclick = () => {
   stage.cards = [];
   stage.effects = [];
   status('Проверка: строки, плашки, бум, глитч и выстрел. Плашки включаются кнопкой «Плашки».');
-  $('panel').classList.add('hidden');
+  closeSheet();
   DEMO_LINES.forEach((text, i) => {
     setTimeout(() => {
       const t = performance.now() / 1000;
@@ -575,6 +614,7 @@ function loop() {
     stage.draw(now, state.flags.camera && live ? state.video : null,
                state.flags.hands || state.flags.silhouette ? vision : null);
     if (!live) hello();                       // камеры нет — объясняем, что нажать
+    drawCount();                              // 3-2-1 перед записью
   } catch (err) {
     if (err.message !== lastError) {          // сбой в отрисовке не должен всё гасить
       lastError = err.message;
@@ -601,9 +641,9 @@ function hello() {
   ctx.font = `${Math.round(H * 0.019)}px Inter, system-ui, sans-serif`;
   const lines = state.stream
     ? ['Камера включается…']
-    : ['Нажми «📷 Камера», чтобы увидеть себя',
-       'Меню — кнопка ☰ сверху или полоска снизу',
-       'Там же: свои песни, «Проверка эффектов» и запись'];
+    : ['Нажми «📷 Камера» снизу, чтобы увидеть себя',
+       '«☰ Меню» — свои песни и эффекты',
+       '«⏺ Запись» — отсчёт 3-2-1 и съёмка клипа'];
   lines.forEach((t, i) => ctx.fillText(t, W / 2, H * 0.45 + i * H * 0.035));
   ctx.font = `${Math.round(H * 0.014)}px Inter, system-ui, sans-serif`;
   ctx.fillStyle = '#5a5f68';
@@ -620,65 +660,163 @@ addEventListener('pointerdown', function first() {
   if (state.flags.camera && !state.stream) startCamera();
 }, { once: false });
 
-addEventListener('resize', () => stage.resize());
-stage.resize();
+/** Подгон под экран телефона: размер холста и поля под чёлку и нижнюю панель. */
+function fit() {
+  stage.resize();
+  const probe = getComputedStyle($('safe'));
+  const top = parseFloat(probe.paddingTop) || 0;         // чёлка / строка состояния
+  const bottom = parseFloat(probe.paddingBottom) || 0;   // полоса «домой»
+  const bars = document.body.classList.contains('recording');
+  stage.safe = stage.phone
+    ? { top: top + 46, bottom: bottom + (bars ? 96 : 84) }   // сверху название, снизу кнопки
+    : { top: top + 16, bottom: bottom + 16 };
+}
+
+addEventListener('resize', fit);
+addEventListener('orientationchange', () => setTimeout(fit, 250));
+visualViewport?.addEventListener('resize', fit);
+fit();
 loop();
 
-// ---------- запись видео ----------
+// ---------- отдельный режим записи ----------
+// Нажал «Запись» — интерфейс уходит, идёт отсчёт 3-2-1, песня запускается сама,
+// на экране только время и круглая кнопка «стоп».
 
-let recorder = null, chunks = [];
+const rec = { recorder: null, chunks: [], type: '', timer: null, wake: null, count: null };
+let mix = null;                       // звук песни + микрофон, собираем один раз
 
-$('recBtn').onclick = async () => {
-  if (recorder) {
-    recorder.stop();
+function mixer() {
+  if (!mix) {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const dest = ctx.createMediaStreamDestination();
+    const song = ctx.createMediaElementSource(state.audio);
+    song.connect(dest);
+    song.connect(ctx.destination);    // песню при этом всё так же слышно
+    mix = { ctx, dest };
+  }
+  if (mix.ctx.state === 'suspended') mix.ctx.resume();
+  return mix;
+}
+
+/** Отсчёт перед съёмкой: рисуется на холсте, его же видно в записи. */
+function countdown(from) {
+  return new Promise((resolve) => {
+    rec.count = { left: from, at: performance.now() / 1000 };
+    const tick = () => {
+      if (!rec.count) { resolve(); return; }            // отменили
+      rec.count.left -= 1;
+      rec.count.at = performance.now() / 1000;
+      if (rec.count.left <= 0) { rec.count = null; resolve(); }
+      else setTimeout(tick, 1000);
+    };
+    setTimeout(tick, 1000);
+  });
+}
+
+function drawCount() {
+  if (!rec.count) return;
+  const ctx = stage.ctx, t = performance.now() / 1000 - rec.count.at;
+  const k = Math.max(0, 1 - t);
+  const cx = stage.W / 2, cy = stage.topY + (stage.bottomY - stage.topY) / 2;
+  ctx.save();
+  ctx.globalAlpha = 0.25 + 0.55 * k;
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, stage.W * 0.16 * (1.4 - 0.4 * k), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 0.5 + 0.5 * k;
+  ctx.textAlign = 'center';
+  ctx.font = `900 ${Math.round(stage.H * 0.16)}px Inter, system-ui, sans-serif`;
+  stage.outlineText(ctx, String(rec.count.left), cx, cy + stage.H * 0.055, ctx.font, '#fff', '#000', 12);
+  ctx.restore();
+}
+
+async function startRecording() {
+  if (rec.recorder || rec.count) return;
+  if (!window.MediaRecorder || !$('canvas').captureStream) {
+    status('Этот браузер не умеет записывать видео. На iPhone нужен Safari.');
     return;
   }
+  document.body.classList.add('recording');
+  $('recBar').hidden = false;
+  closeSheet();
+  fit();
+  await goFullscreen();
+  if (state.flags.camera) await startCamera();
+  try { rec.wake = await navigator.wakeLock?.request('screen'); } catch { /* не дали — ладно */ }
+  await countdown(3);
+  if (!document.body.classList.contains('recording')) return;   // успели нажать «стоп»
   try {
-    const canvasStream = $('canvas').captureStream(60);
-    const ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
-    const dest = ctxAudio.createMediaStreamDestination();
-    if (state.audio.src) {                       // песня — в запись
-      const src = ctxAudio.createMediaElementSource(state.audio);
-      src.connect(dest);
-      src.connect(ctxAudio.destination);
-    }
-    try {                                        // и голос с микрофона
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-      ctxAudio.createMediaStreamSource(mic).connect(dest);
+    const video = $('canvas').captureStream(60).getVideoTracks();
+    const audio = [];
+    if (state.audio.src) audio.push(...mixer().dest.stream.getAudioTracks());
+    try {                                        // голос с микрофона — если дадут
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const { ctx, dest } = mixer();
+      ctx.createMediaStreamSource(micStream).connect(dest);
+      if (!audio.length) audio.push(...dest.stream.getAudioTracks());
     } catch { /* без микрофона — тоже нормально */ }
-    const stream = new MediaStream([...canvasStream.getVideoTracks(),
-                                    ...dest.stream.getAudioTracks()]);
-    const type = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm']
-      .find((t) => MediaRecorder.isTypeSupported(t));
-    recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 14_000_000,
-                                           audioBitsPerSecond: 192_000 });
-    chunks = [];
-    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `yeahmusic-${Date.now()}.${type.includes('mp4') ? 'mp4' : 'webm'}`;
-      a.click();
-      recorder = null;
-      $('recBtn').textContent = '● Запись';
-      $('rec').textContent = '';
-      status('Видео сохранено.');
-    };
-    recorder.start();
-    $('recBtn').textContent = '■ Стоп запись';
-    const started = Date.now();
-    const tick = () => {
-      if (!recorder) return;
-      const s = Math.floor((Date.now() - started) / 1000);
-      $('rec').textContent = `● ${String((s / 60) | 0).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-      setTimeout(tick, 500);
-    };
-    tick();
+    rec.type = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm']
+      .find((t) => MediaRecorder.isTypeSupported(t)) || '';
+    rec.recorder = new MediaRecorder(new MediaStream([...video, ...audio]),
+      { mimeType: rec.type, videoBitsPerSecond: 14_000_000, audioBitsPerSecond: 192_000 });
+    rec.chunks = [];
+    rec.recorder.ondataavailable = (e) => e.data.size && rec.chunks.push(e.data);
+    rec.recorder.onstop = saveVideo;
+    rec.recorder.start();
+    if (state.audio.src) await start();          // песня с начала, вместе с записью
+    const began = Date.now();
+    rec.timer = setInterval(() => {
+      const sec = Math.floor((Date.now() - began) / 1000);
+      $('recTime').textContent = `${String((sec / 60) | 0).padStart(2, '0')}:`
+                                 + String(sec % 60).padStart(2, '0');
+    }, 500);
+    $('recTime').textContent = '00:00';
   } catch (err) {
     status(`Запись не пошла: ${err.message}`);
+    exitRecording();
   }
-};
+}
+
+function saveVideo() {
+  const blob = new Blob(rec.chunks, { type: rec.type });
+  const name = `yeahmusic-${Date.now()}.${rec.type.includes('mp4') ? 'mp4' : 'webm'}`;
+  const file = new File([blob], name, { type: rec.type });
+  if (navigator.canShare?.({ files: [file] })) {      // на телефоне — сразу «Поделиться»
+    navigator.share({ files: [file] }).catch(() => download(blob, name));
+  } else download(blob, name);
+  status(`Клип готов: ${Math.round(blob.size / 104857.6) / 10} МБ.`);
+}
+
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+}
+
+function exitRecording() {
+  clearInterval(rec.timer);
+  rec.timer = null;
+  rec.count = null;
+  rec.recorder = null;
+  rec.wake?.release?.().catch(() => {});
+  rec.wake = null;
+  document.body.classList.remove('recording');
+  $('recBar').hidden = true;
+  fit();
+}
+
+function stopRecording() {
+  if (rec.recorder && rec.recorder.state !== 'inactive') rec.recorder.stop();
+  stopShow();
+  exitRecording();
+}
+
+$('recBtn').onclick = startRecording;
+$('recStop').onclick = stopRecording;
 
 // ---------- установка как приложения ----------
 

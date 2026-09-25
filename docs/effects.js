@@ -42,16 +42,26 @@ export class Stage {
     this.rings = [];             // круги-волны от сильных ударов
     this.sparks = [];            // искры под бит
     this.splitUntil = 0;         // зеркальная симметрия кадра
+    // сколько сверху и снизу занято телефоном (чёлка, полоса «домой») и нашими кнопками
+    this.safe = { top: 0, bottom: 0 };
   }
 
+  get topY() { return this.safe.top; }
+
+  get bottomY() { return this.H - this.safe.bottom; }
+
   resize() {
+    // размер берём у самого холста: innerWidth/innerHeight на телефоне врут из-за полос
+    // браузера, и тогда картинка растягивается — лицо становится широким
+    const r = this.cv.getBoundingClientRect();
+    const w = Math.round(r.width) || innerWidth, h = Math.round(r.height) || innerHeight;
     const dpr = Math.min(devicePixelRatio || 1, 2) * this.quality;
-    this.cv.width = Math.round(innerWidth * dpr);
-    this.cv.height = Math.round(innerHeight * dpr);
+    this.cv.width = Math.round(w * dpr);
+    this.cv.height = Math.round(h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.ctx.imageSmoothingQuality = 'high';
-    this.W = innerWidth;
-    this.H = innerHeight;
+    this.W = w;
+    this.H = h;
   }
 
   // ---------- окно камеры ----------
@@ -140,8 +150,8 @@ export class Stage {
         words: words.map((w, i) => [w, duration * 0.7 * i / Math.max(1, words.length)]) });
       return null;
     }
-    const phone = this.H / this.W > 1.4;
-    const w = this.W * (phone ? 0.86 : CARD.w), h = this.H * (phone ? 0.16 : CARD.h);
+    const phone = this.phone;
+    const w = this.W * (phone ? 0.86 : CARD.w), h = this.H * (phone ? 0.12 : CARD.h);
     const cam = this.box(now);
     const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
     const face = { x: cam.x + cam.w / 5, y: cam.y + cam.h / 6, w: cam.w * 0.6, h: cam.h * 0.66 };
@@ -150,22 +160,25 @@ export class Stage {
     // места для строк: сверху и снизу от кадра, ряд за рядом — так они не налезают
     const slots = [];
     const full = cam.h > this.H * 0.9;
-    const bands = full ? [this.H * 0.08, this.H * 0.62] : [this.H * 0.07, cam.y + cam.h + 12];
-    for (const top of bands) {
+    const top = this.topY + 10;                       // ниже чёлки и строки с названием
+    const floor = this.bottomY - 10;                  // выше нижней панели
+    const bands = full ? [top, this.H * 0.58] : [top, Math.max(top, cam.y + cam.h + 12)];
+    for (const band of bands) {
       for (let k = 0; k < 3; k++) {
-        const y = top + k * (h + 10);
-        if (y + h > this.H - 30) break;
+        const y = band + k * (h + 10);
+        if (y + h > floor) break;
         slots.push({ x: (this.W - w) / 2 + (phone ? 0 : (k % 2 ? 1 : -1) * this.W * 0.12),
                      y, w, h });
       }
     }
     const free = slots.filter((slot) => !busy.some((b) => hits(slot, b)));
     const pos = free.length ? free[Math.floor(Math.random() * free.length)] : null;
-    const fallback = slots[0] || { x: 20, y: this.H * 0.1, w, h };
-    const card = { text, ...(pos || fallback || { x: 20, y: this.H * 0.3 }), w, h,
+    if (!pos) this.cards.shift();                     // свободного места нет — убираем старую
+    const fallback = slots[0] || { x: 20, y: top, w, h };
+    const card = { text, ...(pos || fallback), w, h,
                    born: now, charMs: ms, push: [0, 0], pushAt: -9 };
     this.cards.push(card);
-    while (this.cards.length > 3) this.cards.shift();
+    while (this.cards.length > (phone ? 2 : 3)) this.cards.shift();
     return card;
   }
 
@@ -423,7 +436,7 @@ export class Stage {
     levels.forEach((v, i) => {
       const h = 8 + 120 * v;
       ctx.globalAlpha = fade * (0.25 + 0.5 * v);
-      ctx.fillRect(i * bar + bar * 0.14, this.H - h - 16, bar * 0.72, h);
+      ctx.fillRect(i * bar + bar * 0.14, this.bottomY - h - 8, bar * 0.72, h);
     });
     ctx.restore();
   }
@@ -529,7 +542,8 @@ export class Stage {
       row.push([w, at, ww]); width += ww;
     }
     if (row.length) rows.push([row, width]);
-    let y = this.H * 0.68 - (rows.length - 1) * size * 0.6;
+    let y = Math.min(this.H * 0.68, this.bottomY - size * (rows.length - 0.2))
+            - (rows.length - 1) * size * 0.6;
     for (const [cells, width] of rows) {
       let x = this.W / 2 - width / 2;
       for (const [w, at, ww] of cells) {
@@ -561,7 +575,7 @@ export class Stage {
       ? 0.05 + 1.35 * clamp(t / 0.17, 0, 1) ** 0.45 - 0.2 * clamp((t - 0.17) / 0.1, 0, 1)
       : 0.3 + 0.95 * clamp(t / 0.12, 0, 1) - 0.15 * clamp((t - 0.12) / 0.1, 0, 1);
     ctx.globalAlpha = Math.max(0, 1 - Math.max(0, t - 0.65) / 0.35);
-    ctx.translate(this.W / 2, this.H * 0.42);
+    ctx.translate(this.W / 2, this.topY + (this.bottomY - this.topY) * 0.42);
     ctx.scale(scale, scale);
     if (t < 0.15) {
       ctx.fillStyle = 'rgba(255,40,70,.8)';
@@ -582,11 +596,12 @@ export class Stage {
     ctx.font = `900 ${size}px Inter, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     const width = ctx.measureText(e.text).width;
-    const fit = Math.min(1, cam.h * 0.95 / width);
+    const fit = Math.min(1, (Math.min(cam.h, this.bottomY - this.topY) * 0.9) / width);
     const half = size * fit * 0.62 + 14;
-    const x = (e.left ? cam.x - half : cam.x + cam.w + half) + (e.left ? -160 : 160) * slide;
+    const x = clamp(e.left ? cam.x - half : cam.x + cam.w + half, half, this.W - half)
+              + (e.left ? -160 : 160) * slide;
     ctx.globalAlpha = fade;
-    ctx.translate(x, cam.y + cam.h / 2);
+    ctx.translate(x, clamp(cam.y + cam.h / 2, this.topY + 20, this.bottomY - 20));
     ctx.rotate(e.left ? -Math.PI / 2 : Math.PI / 2);
     ctx.scale(fit, fit);
     this.outlineText(ctx, e.text, 0, size * 0.34, ctx.font, '#fff', '#000', 10);
