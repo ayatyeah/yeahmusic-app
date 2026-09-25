@@ -647,6 +647,22 @@ class CvCamera:
         self.cap.release()
 
 
+def camera_busy_by():
+    """Кто держит камеру: [имена программ]. Linux отдаёт вебку только одной разом."""
+    names = set()
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            for fd in (proc / "fd").iterdir():
+                if fd.resolve().name.startswith("video"):
+                    names.add((proc / "comm").read_text().strip())
+                    break
+        except OSError:
+            continue
+    return sorted(names)
+
+
 def open_camera(device=None):
     """Запускает камеру (сначала в HD через OpenCV, иначе через pygame);
     RuntimeError с понятным текстом, если не вышло."""
@@ -668,7 +684,10 @@ def open_camera(device=None):
         cam = pygame.camera.Camera(device or CAM_DEVICE or cams[0], CAM_RES)
         cam.start()
     except (SystemError, OSError, ValueError) as e:
-        raise RuntimeError(f"Камера не запускается (может, занята другой программой?)\n{e}")
+        busy = camera_busy_by()
+        who = f"Камеру занял: {', '.join(busy)}. Закрой эту программу (или вкладку браузера)." \
+            if busy else f"Камера не запускается.\n{e}"
+        raise RuntimeError(who)
     return cam
 
 
