@@ -3,6 +3,7 @@
 
 import { Stage } from './effects.js';
 import { Vision } from './vision.js';
+import { store } from './store.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -22,9 +23,13 @@ const state = {
   flags: { camera: true, hands: true, silhouette: true, beat: true, mirror: true, box: false },
   nextLine: 0, nextBoom: 0, lastEq: -9, lastSide: -9, side: 'right', lastWord: -9,
   moments: [],
+  track: null,             // какая песня выбрана сейчас
 };
 state.video.playsInline = true;
 state.video.muted = true;
+state.video.setAttribute('playsinline', '');
+state.video.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';
+document.body.appendChild(state.video);
 state.audio.preload = 'auto';
 
 // ---------- настройки-«фишки» ----------
@@ -46,40 +51,93 @@ const status = (text) => { $('status').textContent = text; };
 
 // ---------- файлы ----------
 
-$('audioFile').onchange = (e) => {
+$('audioFile').onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  state.audio.src = URL.createObjectURL(file);
-  status(`Песня: ${file.name}`);
+  e.target.value = '';
+  const item = await store.save({ name: file.name.replace(/\.[^.]+$/, ''), audio: file, data: null });
+  await loadTrack(item);
+  await renderTracks();
+  status(`Добавил «${item.name}». Теперь можно сделать разметку или сразу показывать.`);
 };
 
 $('dataFile').onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  e.target.value = '';
   try {
-    state.data = JSON.parse(await file.text());
-    state.moments = findMoments(state.data.lines || []);
-    status(`Разметка: ${state.data.name || file.name} — строк ${state.data.lines.length}`);
+    const data = JSON.parse(await file.text());
+    applyData(data);
+    if (state.track) {
+      state.track = await store.save({ ...state.track, data });
+      await renderTracks();
+    }
+    status(`Разметка на месте: строк ${data.lines.length}`);
   } catch (err) {
     status(`Файл разметки не читается: ${err.message}`);
   }
 };
 
+function applyData(data) {
+  state.data = data;
+  state.moments = findMoments(data.lines || []);
+}
+
+async function loadTrack(item) {
+  state.track = item;
+  state.audio.src = URL.createObjectURL(item.audio);
+  if (item.data) applyData(item.data); else { state.data = null; state.moments = []; }
+  await renderTracks();
+}
+
+async function renderTracks() {
+  const list = await store.list();
+  const box = $('tracks');
+  box.innerHTML = '';
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">Пока пусто. Добавь песню кнопкой ниже.</div>';
+    return;
+  }
+  for (const item of list) {
+    const row = document.createElement('div');
+    row.className = 'track' + (state.track && item.id === state.track.id ? ' active' : '');
+    const size = Math.round((item.audio?.size || 0) / 104857.6) / 10;
+    row.innerHTML = `<div class="name">${item.name}
+        <div class="meta">${item.data ? `разметка: ${item.data.lines.length} строк` : 'без разметки'}
+        · ${size} МБ</div></div>`;
+    const play = document.createElement('button');
+    play.textContent = '▶';
+    play.onclick = async () => { await loadTrack(item); start(); };
+    const del = document.createElement('button');
+    del.textContent = '✕';
+    del.onclick = async () => {
+      await store.remove(item.id);
+      if (state.track?.id === item.id) { state.track = null; state.data = null; state.audio.src = ''; }
+      await renderTracks();
+    };
+    row.onclick = (e) => { if (e.target === row || e.target.closest('.name')) loadTrack(item); };
+    row.append(play, del);
+    box.append(row);
+  }
+}
+
+renderTracks();
+
 // Обработка песни на сервере: тайминги, биты и разметка ИИ — прямо с телефона.
 $('prepareBtn').onclick = async () => {
-  const file = $('audioFile').files[0];
-  if (!file) { status('Сначала выбери песню.'); return; }
+  if (!state.track) { status('Сначала выбери песню в списке.'); return; }
   const form = new FormData();
-  form.append('audio', file);
+  form.append('audio', state.track.audio, `${state.track.name}.mp3`);
   form.append('lyrics', $('lyrics').value);
-  form.append('name', file.name.replace(/\.[^.]+$/, ''));
+  form.append('name', state.track.name);
   $('prepareBtn').disabled = true;
   status('Сервер слушает песню, это примерно минута…');
   try {
     const res = await fetch(`${api()}/api/prepare`, { method: 'POST', body: form });
     if (!res.ok) throw new Error(`сервер ответил ${res.status}: ${(await res.text()).slice(0, 160)}`);
-    state.data = await res.json();
-    state.moments = findMoments(state.data.lines || []);
+    applyData(await res.json());
+    state.track = await store.save({ ...state.track, data: state.data });
+    await renderTracks();
     const big = state.data.lines.filter((l) => l.big).length;
     status(state.data.ai
       ? `Готово: строк ${state.data.lines.length}, крупных ${big}, темп ${state.data.bpm}.`
@@ -111,11 +169,7 @@ $('apiInput').onchange = () => {
 };
 checkServer();
 
-$('demoBtn').onclick = () => {
-  state.data = null;
-  state.moments = [];
-  status('Без разметки: только камера, руки и жесты.');
-};
+
 
 /** Особые моменты: крупные строки и обычные между ними (как в программе). */
 function findMoments(lines) {
@@ -136,8 +190,21 @@ const inMoment = (t) => state.moments.some(([a, b]) => t >= a && t < b);
 
 // ---------- камера ----------
 
+const CAMERA_HINTS = {
+  NotAllowedError: 'браузер не дал доступ. Нажми на замок слева от адреса → Камера → Разрешить '
+                   + '(на iPhone: Настройки → Safari → Камера).',
+  NotFoundError: 'камера не найдена.',
+  NotReadableError: 'камеру занял кто-то другой — закрой другие вкладки и программы с камерой.',
+  SecurityError: 'нужен адрес на https.',
+  OverconstrainedError: 'камера не поддержала запрошенный размер.',
+};
+
 async function startCamera() {
-  if (state.stream) return;
+  if (state.stream) return true;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    status('Браузер не умеет показывать камеру. Нужен Safari или Chrome по https.');
+    return false;
+  }
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -146,14 +213,26 @@ async function startCamera() {
     state.video.srcObject = state.stream;
     await state.video.play();
     status('Камера включена.');
-    if (!vision.ready && (state.flags.hands || state.flags.silhouette)) {
-      status('Загружаю распознавание рук…');
-      await vision.init({ wantHands: state.flags.hands, wantSegment: state.flags.silhouette });
-      status('Готово.');
-    }
   } catch (err) {
-    status(`Камера не открылась: ${err.message}`);
+    const hint = CAMERA_HINTS[err.name] || err.message;
+    status(`Камера не включилась: ${hint}`);
+    return false;
   }
+  loadVision();                       // распознавание грузится отдельно и камере не мешает
+  return true;
+}
+
+async function loadVision() {
+  if (vision.ready || vision.loading) return;
+  if (!state.flags.hands && !state.flags.silhouette) return;
+  vision.loading = true;
+  try {
+    await vision.init({ wantHands: state.flags.hands, wantSegment: state.flags.silhouette });
+    status('Руки и силуэт подключены.');
+  } catch (err) {
+    status(`Камера работает, но распознавание рук не загрузилось: ${err.message}`);
+  }
+  vision.loading = false;
 }
 
 function stopCamera() {
@@ -164,15 +243,20 @@ function stopCamera() {
 
 // ---------- показ ----------
 
-$('startBtn').onclick = async () => {
+async function start() {
+  if (!state.audio.src) { status('Сначала добавь или выбери песню.'); return; }
   if (state.flags.camera) await startCamera();
   state.nextLine = 0; state.nextBoom = 0; state.lastEq = -9; state.lastWord = -9;
   stage.cards = []; stage.effects = [];
-  if (state.audio.src) { state.audio.currentTime = 0; await state.audio.play(); }
+  state.audio.currentTime = 0;
+  await state.audio.play();
   state.playing = true;
   $('stopBtn').disabled = false;
   $('panel').classList.add('hidden');
-};
+  status(state.data ? '' : 'Показ без разметки: только камера и жесты.');
+}
+
+$('startBtn').onclick = start;
 
 $('stopBtn').onclick = () => {
   state.playing = false;
@@ -182,6 +266,11 @@ $('stopBtn').onclick = () => {
 };
 
 $('showPanel').onclick = () => $('panel').classList.toggle('hidden');
+$('grip').onclick = () => $('panel').classList.toggle('hidden');
+$('camBtn').onclick = async () => {
+  if (state.stream) { stopCamera(); $('camBtn').textContent = '📷 Включить камеру'; return; }
+  if (await startCamera()) $('camBtn').textContent = '📷 Выключить камеру';
+};
 
 /** Что должно случиться к этому моменту песни. */
 function timeline(songTime, now) {
