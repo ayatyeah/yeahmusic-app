@@ -1,0 +1,5 @@
+pygame-ce
+numpy
+PySide6-Essentials
+mediapipe
+faster-whisper

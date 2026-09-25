@@ -1,0 +1,15 @@
+{
+  "name": "YeahMusic",
+  "short_name": "YeahMusic",
+  "description": "Липсинг с эффектами: строки песни в такт, жесты руками, бит",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101113",
+  "theme_color": "#101113",
+  "icons": [
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
