@@ -1,6 +1,6 @@
 // Офлайн-режим: код приложения кладём в кэш, распознавание руками грузится из сети.
-const CACHE = 'yeahmusic-v1';
-const FILES = ['./', 'index.html', 'app.js', 'effects.js', 'vision.js',
+const CACHE = 'yeahmusic-v3';
+const FILES = ['./', 'index.html', 'app.js', 'effects.js', 'vision.js', 'store.js',
                'manifest.webmanifest', 'icon.png'];
 
 self.addEventListener('install', (e) => {
@@ -8,8 +8,9 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((keys) =>
-    Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))));
+  e.waitUntil(caches.keys()
+    .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    .then(() => self.clients.claim()));           // новая версия вступает в силу сразу
 });
 
 self.addEventListener('fetch', (e) => {

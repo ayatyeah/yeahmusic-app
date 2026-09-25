@@ -5,7 +5,13 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
+const VERSION = 'v5 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
+
+// Любая ошибка — на экран, а не в молчаливый чёрный фон.
+const errors = [];
+addEventListener('error', (e) => errors.push(e.message));
+addEventListener('unhandledrejection', (e) => errors.push(String(e.reason?.message || e.reason)));
 
 // Сервер обработки: своя страница с сервером — она же, иначе (GitHub Pages) — Railway.
 const DEFAULT_API = 'https://yeahmusic-app-production.up.railway.app';
@@ -479,8 +485,15 @@ function hello() {
     ? ['Камера включается…']
     : ['Нажми «📷 Камера», чтобы увидеть себя',
        'Меню — кнопка ☰ сверху или полоска снизу',
-       'Там же: свои песни, разметка и запись'];
+       'Там же: свои песни, «Проверка эффектов» и запись'];
   lines.forEach((t, i) => ctx.fillText(t, W / 2, H * 0.45 + i * H * 0.035));
+  ctx.font = `${Math.round(H * 0.014)}px Inter, system-ui, sans-serif`;
+  ctx.fillStyle = '#5a5f68';
+  ctx.fillText(VERSION, W / 2, H * 0.62);
+  if (errors.length) {                       // ошибки видно прямо на экране
+    ctx.fillStyle = '#ff6b6b';
+    errors.slice(-3).forEach((t, i) => ctx.fillText(t.slice(0, 90), W / 2, H * 0.66 + i * H * 0.022));
+  }
 }
 
 // первое касание экрана — можно просить камеру (браузер разрешает только после жеста)
@@ -564,5 +577,17 @@ $('installBtn').onclick = async () => {
 };
 
 if ('serviceWorker' in navigator) {
-  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('sw.js');
+      reg.update();                            // проверяем обновление при каждом запуске
+      reg.addEventListener('updatefound', () => {
+        reg.installing?.addEventListener('statechange', function () {
+          if (this.state === 'installed' && navigator.serviceWorker.controller) {
+            status('Есть новая версия — обнови страницу.');
+          }
+        });
+      });
+    } catch { /* без офлайна тоже работает */ }
+  });
 }
