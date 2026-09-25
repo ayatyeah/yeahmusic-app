@@ -56,19 +56,19 @@ export class Stage {
     this.shape = name;
   }
 
+  get phone() { return this.H / this.W > 1.4; }
+
   shapeBox(name) {
+    if (this.phone) return { x: 0, y: 0, w: this.W, h: this.H };   // на телефоне — весь экран
     const [aspect, height] = SHAPES[name];
-    const phone = this.H / this.W > 1.4;         // вертикальный экран — растягиваем по ширине
-    let w, h;
-    if (phone) {
-      w = this.W;
-      h = Math.min(w / aspect, this.H * 0.82);
-      w = Math.min(w, h * aspect);
-    } else {
-      h = this.H * height;
-      w = h * aspect;
-    }
+    const h = this.H * height, w = h * aspect;
     return { x: (this.W - w) / 2, y: (this.H - h) / 2, w, h };
+  }
+
+  /** На телефоне форма кадра превращается в приближение: широкий — как есть, узкий — ближе. */
+  shapeZoom() {
+    if (!this.phone) return 1;
+    return { wide: 1, medium: 1.15, tall: 1.3 }[this.shape] || 1;
   }
 
   box(now) {
@@ -138,7 +138,9 @@ export class Stage {
     const busy = [face, center, ...this.cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }))];
     // места для строк: сверху и снизу от кадра, ряд за рядом — так они не налезают
     const slots = [];
-    for (const top of [this.H * 0.07, cam.y + cam.h + 12]) {
+    const full = cam.h > this.H * 0.9;
+    const bands = full ? [this.H * 0.08, this.H * 0.62] : [this.H * 0.07, cam.y + cam.h + 12];
+    for (const top of bands) {
       for (let k = 0; k < 3; k++) {
         const y = top + k * (h + 10);
         if (y + h > this.H - 30) break;
@@ -242,8 +244,11 @@ export class Stage {
     let sw = vw, sh = vh;
     if (vw / vh > aspect) sw = vh * aspect; else sh = vw / aspect;
     this.zoom += (this.zoomTarget - this.zoom) * 0.06;      // плавное приближение к лицу
-    sw /= this.zoom; sh /= this.zoom;
+    const zoom = this.zoom * this.shapeZoom();
+    sw /= zoom; sh /= zoom;
     const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+    // какую часть кадра видно — руки и силуэт рисуем по этим же долям, иначе будет сдвиг
+    this.view = { sx: sx / vw, sy: sy / vh, sw: sw / vw, sh: sh / vh };
     const paint = (box, alpha = 1) => {
       ctx.save();
       ctx.globalAlpha = alpha;
@@ -274,7 +279,7 @@ export class Stage {
       ctx.restore();
     }
     paint(cam);
-    if (vision) vision.draw(ctx, cam, now, this.mirror);
+    if (vision) vision.draw(ctx, cam, now, this.mirror, this.view);
     this.drawSparks(ctx, now);
     ctx.strokeStyle = 'rgba(189,189,189,.85)';
     ctx.lineWidth = 1;

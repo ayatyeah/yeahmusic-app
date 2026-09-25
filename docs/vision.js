@@ -272,17 +272,22 @@ export class Vision {
   }
 
   /** Силуэты-двойники и неоновые руки поверх кадра камеры. */
-  draw(ctx, cam, now, mirror) {
-    const toScreen = ([x, y]) => [cam.x + (mirror ? 1 - x : x) * cam.w, cam.y + y * cam.h];
+  draw(ctx, cam, now, mirror, view) {
+    // view — какая часть кадра сейчас видна (обрезка под форму окна + приближение)
+    const v = view || { sx: 0, sy: 0, sw: 1, sh: 1 };
+    const toScreen = ([x, y]) => {
+      const fx = (x - v.sx) / v.sw, fy = (y - v.sy) / v.sh;
+      return [cam.x + (mirror ? 1 - fx : fx) * cam.w, cam.y + fy * cam.h];
+    };
     if (this.segment) {
       [[0.18, 0.33], [0.36, 0.2]].forEach(([delay, alpha]) => {
         const m = this.maskAt(now - delay);
-        if (m) this.drawMask(ctx, cam, m, `rgba(120,220,255,${alpha})`, mirror);
+        if (m) this.drawMask(ctx, cam, m, `rgba(120,220,255,${alpha})`, mirror, false, v);
       });
       if (now < this.outlineUntil) {
         const m = this.maskAt(now);
         const k = Math.sin(Math.PI * (1 - (this.outlineUntil - now) / 1.2)) ** 0.6;
-        if (m) this.drawMask(ctx, cam, m, `rgba(200,245,255,${0.9 * k})`, mirror, true);
+        if (m) this.drawMask(ctx, cam, m, `rgba(200,245,255,${0.9 * k})`, mirror, true, v);
       }
     }
     for (const pts of this.hands) {
@@ -332,12 +337,18 @@ export class Vision {
     }
   }
 
-  drawMask(ctx, cam, mask, color, mirror, edge = false) {
+  drawMask(ctx, cam, mask, color, mirror, edge = false, view = null) {
+    const v = view || { sx: 0, sy: 0, sw: 1, sh: 1 };
+    // рисуем ту же часть маски, что видна в кадре
+    cam = { x: cam.x - v.sx / v.sw * cam.w, y: cam.y - v.sy / v.sh * cam.h,
+            w: cam.w / v.sw, h: cam.h / v.sh };
     ctx.save();
     ctx.beginPath();
-    ctx.rect(cam.x, cam.y, cam.w, cam.h);
+    ctx.rect(cam.x + v.sx / v.sw * cam.w, cam.y + v.sy / v.sh * cam.h,
+             cam.w * v.sw, cam.h * v.sh);
     ctx.clip();
-    if (mirror) { ctx.translate(cam.x * 2 + cam.w, 0); ctx.scale(-1, 1); }
+    if (mirror) { ctx.translate((cam.x + v.sx / v.sw * cam.w) * 2 + cam.w * v.sw, 0);
+                  ctx.scale(-1, 1); }
     const rgba = color.match(/[\d.]+/g).map(Number);
     ctx.globalAlpha = rgba[3] ?? 1;
     if (edge) {                                  // контур: силуэт минус он же, чуть сжатый
