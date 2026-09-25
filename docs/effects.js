@@ -17,7 +17,8 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export class Stage {
   constructor(canvas) {
     this.cv = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false });   // без прозрачности рисуется быстрее
+    this.quality = 1;                                       // падает, если не вытягиваем
     this.cards = [];
     this.effects = [];          // вспышки, дырки от пуль, «ПАУ!», крупные слова
     this.shape = 'wide';
@@ -39,7 +40,7 @@ export class Stage {
   }
 
   resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const dpr = Math.min(devicePixelRatio || 1, 1.5) * this.quality;
     this.cv.width = Math.round(innerWidth * dpr);
     this.cv.height = Math.round(innerHeight * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -121,22 +122,22 @@ export class Stage {
     }
     const w = this.W * CARD.w, h = this.H * CARD.h;
     const cam = this.box(now);
+    const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const face = { x: cam.x + cam.w / 5, y: cam.y + cam.h / 6, w: cam.w * 0.6, h: cam.h * 0.66 };
+    const center = { x: this.W * 0.1, y: this.H * 0.55, w: this.W * 0.8, h: this.H * 0.28 };
+    const busy = [face, center, ...this.cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }))];
     let pos = null, fallback = null;
-    for (let i = 0; i < 60; i++) {
-      const x = 20 + Math.random() * (this.W - w - 40);
-      const y = this.H * 0.22 + Math.random() * (this.H * 0.62 - h);
-      const face = { x: cam.x + cam.w / 5, y: cam.y + cam.h / 6, w: cam.w * 0.6, h: cam.h * 0.66 };
-      if (x < face.x + face.w && face.x < x + w && y < face.y + face.h && face.y < y + h) continue;
-      fallback = fallback || { x, y };
-      const last = this.cards[this.cards.length - 1];
-      if (!last || Math.abs(x - last.x) > w * 0.8 || Math.abs(y - last.y) > h * 0.8) {
-        pos = { x, y }; break;
-      }
+    for (let i = 0; i < 80; i++) {
+      const box = { x: 20 + Math.random() * (this.W - w - 40),
+                    y: this.H * 0.16 + Math.random() * (this.H * 0.5 - h), w, h };
+      fallback = fallback || box;
+      if (busy.some((b) => hits(box, b))) continue;      // ни на лицо, ни на другие строки
+      pos = box; break;
     }
     const card = { text, ...(pos || fallback || { x: 20, y: this.H * 0.3 }), w, h,
                    born: now, charMs: ms, push: [0, 0], pushAt: -9 };
     this.cards.push(card);
-    while (this.cards.length > 4) this.cards.shift();
+    while (this.cards.length > 3) this.cards.shift();
     return card;
   }
 
@@ -364,6 +365,9 @@ export class Stage {
 
   drawCards(ctx, now) {
     const size = Math.round(this.H * 0.028);
+    const big = this.effects.some((e) => e.kind === 'center');
+    ctx.save();
+    if (big) ctx.globalAlpha = 0.35;                     // крупная строка важнее
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     for (const card of this.cards) {
@@ -417,6 +421,7 @@ export class Stage {
       }
       ctx.restore();
     }
+    ctx.restore();
     this.cards = this.cards.filter((c) => c.y + c.h > -20);
   }
 

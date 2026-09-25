@@ -15,6 +15,25 @@ const HAND_COLOR = [0, 255, 200], GUN_COLOR = [255, 70, 60];
 const EXTENDED = 1.15, FOLDED = 1.1, THUMB_OUT = 0.5;
 const ARM_TIME = 0.25, SHOT_KICK = 0.3, SHOT_TILT = 0.3, SHOT_WINDOW = 0.22, SHOT_COOLDOWN = 0.7;
 
+const MAX_FPS = 24;          // чаще распознавать смысла нет, а нагрузка заметная
+
+/** Маска силуэта → готовая картинка (делаем один раз, а не при каждой отрисовке). */
+function maskToCanvas(data, w, h) {
+  const cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    if (data[i] > 0) {
+      img.data[i * 4] = 255; img.data[i * 4 + 1] = 255;
+      img.data[i * 4 + 2] = 255; img.data[i * 4 + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const unit = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1]; const n = Math.hypot(dx, dy) || 1;
                          return [dx / n, dy / n]; };
@@ -217,6 +236,8 @@ export class Vision {
   process(video, now) {
     const events = [];
     if (!this.ready || !video.videoWidth || video.currentTime === this.lastVideoTime) return events;
+    if (now - (this.lastRun || 0) < 1 / MAX_FPS) return events;     // не чаще, чем нужно
+    this.lastRun = now;
     this.lastVideoTime = video.currentTime;
     const ms = now * 1000;
     if (this.landmarker) {
@@ -233,8 +254,8 @@ export class Vision {
       const res = this.segmenter.segmentForVideo(video, ms);
       const mask = res.categoryMask;
       if (mask) {
-        this.masks.push({ now, data: mask.getAsUint8Array().slice(),
-                          w: mask.width, h: mask.height });
+        this.masks.push({ now, canvas: maskToCanvas(mask.getAsUint8Array(),
+                                                    mask.width, mask.height) });
         this.masks = this.masks.filter((m) => now - m.now < 0.8);
         mask.close();
       }
@@ -312,37 +333,21 @@ export class Vision {
   }
 
   drawMask(ctx, cam, mask, color, mirror, edge = false) {
-    if (!this.maskCanvas) {
-      this.maskCanvas = document.createElement('canvas');
-      this.maskCtx = this.maskCanvas.getContext('2d');
-    }
-    const { w, h, data } = mask;
-    this.maskCanvas.width = w;
-    this.maskCanvas.height = h;
-    const img = this.maskCtx.createImageData(w, h);
-    const rgba = color.match(/[\d.]+/g).map(Number);
-    for (let i = 0; i < w * h; i++) {
-      let on = data[i] > 0;
-      if (on && edge) {                                 // контур: край силуэта
-        const x = i % w, y = (i / w) | 0;
-        const inside = (dx, dy) => {
-          const nx = x + dx, ny = y + dy;
-          return nx >= 0 && ny >= 0 && nx < w && ny < h && data[ny * w + nx] > 0;
-        };
-        on = !(inside(2, 0) && inside(-2, 0) && inside(0, 2) && inside(0, -2));
-      }
-      if (on) {
-        img.data[i * 4] = rgba[0]; img.data[i * 4 + 1] = rgba[1];
-        img.data[i * 4 + 2] = rgba[2]; img.data[i * 4 + 3] = (rgba[3] ?? 1) * 255;
-      }
-    }
-    this.maskCtx.putImageData(img, 0, 0);
     ctx.save();
     ctx.beginPath();
     ctx.rect(cam.x, cam.y, cam.w, cam.h);
     ctx.clip();
     if (mirror) { ctx.translate(cam.x * 2 + cam.w, 0); ctx.scale(-1, 1); }
-    ctx.drawImage(this.maskCanvas, cam.x, cam.y, cam.w, cam.h);
+    const rgba = color.match(/[\d.]+/g).map(Number);
+    ctx.globalAlpha = rgba[3] ?? 1;
+    if (edge) {                                  // контур: силуэт минус он же, чуть сжатый
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(mask.canvas, cam.x - 3, cam.y - 3, cam.w + 6, cam.h + 6);
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.drawImage(mask.canvas, cam.x + 2, cam.y + 2, cam.w - 4, cam.h - 4);
+    } else {
+      ctx.drawImage(mask.canvas, cam.x, cam.y, cam.w, cam.h);
+    }
     ctx.restore();
   }
 

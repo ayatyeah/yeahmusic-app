@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v6 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v7 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -441,10 +441,36 @@ function sound(kind) {
 // ---------- главный цикл ----------
 
 let lastError = '';
+const fps = { frames: 0, since: 0, value: 60 };
+
+/** Если не вытягиваем — сами снижаем нагрузку, чтобы шло плавно. */
+function keepSmooth(now) {
+  fps.frames++;
+  if (now - fps.since < 2) return;
+  fps.value = fps.frames / (now - fps.since);
+  fps.frames = 0;
+  fps.since = now;
+  if (fps.value > 45 || !state.playing && !state.stream) return;
+  if (state.flags.silhouette) {                   // силуэт — самое тяжёлое, гасим первым
+    state.flags.silhouette = false;
+    document.querySelector('[data-flag=silhouette]')?.classList.remove('on');
+    status(`Идёт рывками (${Math.round(fps.value)} кадров/с) — выключил силуэт.`);
+  } else if (stage.quality > 0.7) {
+    stage.quality = 0.7;                          // дальше — рисуем мельче и растягиваем
+    stage.resize();
+    status(`Идёт рывками (${Math.round(fps.value)} кадров/с) — снизил качество картинки.`);
+  } else if (state.flags.hands && fps.value < 24) {
+    state.flags.hands = false;
+    document.querySelector('[data-flag=hands]')?.classList.remove('on');
+    status('Совсем не вытягивает — выключил распознавание рук.');
+  }
+}
 
 function loop() {
   try {
     const now = performance.now() / 1000;
+    if (!fps.since) fps.since = now;
+    keepSmooth(now);
     const songTime = state.audio.currentTime;
     if (state.playing) timeline(songTime, now);
     vision.segment = state.flags.silhouette && vision.ready && inMoment(songTime);
