@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v7 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v8 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -361,6 +361,60 @@ function handleEvent(e, now, cam) {
   else if (name === 'down') stage.jump([0, -1], now);
   else if (name === 'left') stage.jump([-1, 0], now);
   else if (name === 'right') stage.jump([1, 0], now);
+}
+
+// ---------- песни с сервера (личное хранилище по ключу) ----------
+
+const cloudKey = () => localStorage.getItem('key') || '';
+$('keyInput').value = cloudKey();
+$('keyInput').onchange = () => localStorage.setItem('key', $('keyInput').value.trim());
+
+$('cloudBtn').onclick = async () => {
+  const key = $('keyInput').value.trim() || cloudKey();
+  if (!key) { $('cloud').innerHTML = '<div class="empty">Введи ключ хранилища.</div>'; return; }
+  localStorage.setItem('key', key);
+  $('cloud').innerHTML = '<div class="empty">Смотрю, что на сервере…</div>';
+  try {
+    const res = await fetch(`${api()}/api/tracks?key=${encodeURIComponent(key)}`);
+    if (!res.ok) throw new Error(res.status === 403 ? 'ключ не подошёл' : await res.text());
+    const list = await res.json();
+    if (!list.length) { $('cloud').innerHTML = '<div class="empty">На сервере пусто.</div>'; return; }
+    $('cloud').innerHTML = '';
+    for (const item of list) {
+      const row = document.createElement('div');
+      row.className = 'track';
+      row.innerHTML = `<div class="name">${item.name}
+        <div class="meta">${item.lines} строк · ${Math.round(item.size / 104857.6) / 10} МБ</div></div>`;
+      const get = document.createElement('button');
+      get.textContent = '⤓';
+      get.onclick = () => download(item, key, get);
+      row.append(get);
+      $('cloud').append(row);
+    }
+  } catch (err) {
+    $('cloud').innerHTML = `<div class="empty">Не вышло: ${err.message}</div>`;
+  }
+};
+
+/** Скачать песню с сервера и положить в свой список на телефоне. */
+async function download(item, key, button) {
+  button.textContent = '…';
+  try {
+    const url = (what) => `${api()}/api/tracks/${encodeURIComponent(item.id)}/${what}`
+                          + `?key=${encodeURIComponent(key)}`;
+    const [marks, audio] = await Promise.all([
+      fetch(url('marks')).then((r) => r.json()),
+      fetch(url('audio')).then((r) => r.blob()),
+    ]);
+    const saved = await store.save({ name: item.name, audio, data: marks });
+    await loadTrack(saved);
+    await renderTracks();
+    status(`Скачал «${item.name}» — уже в списке песен.`);
+    button.textContent = '✓';
+  } catch (err) {
+    status(`Не скачалось: ${err.message}`);
+    button.textContent = '⤓';
+  }
 }
 
 // ---------- проверка эффектов без песни ----------
