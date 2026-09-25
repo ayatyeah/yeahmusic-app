@@ -75,6 +75,8 @@
          padding:9px 4px; border-radius:11px; }
   .tab.on { background:var(--card); color:var(--text); font-weight:600; }
   .page[hidden] { display:none; }
+  /* наши display:flex у #recBar и кнопок сильнее, чем hidden у браузера — чиним явно */
+  [hidden] { display:none !important; }
 
   h2 { margin:16px 0 8px; font-size:12px; color:var(--dim); font-weight:600;
        text-transform:uppercase; letter-spacing:.06em; }
@@ -194,6 +196,28 @@
   <div id="status"></div>
 </div>
 
+<script>
+  // Если app.js не запустился (ошибка в браузере телефона) — экран останется чёрным.
+  // Ловим это и пишем причину прямо на холсте: без компьютера иначе не узнать.
+  window.boot = [];
+  addEventListener('error', (e) => window.boot.push(e.message || String(e.error)));
+  addEventListener('unhandledrejection', (e) => window.boot.push(String(e.reason)));
+  setTimeout(() => {
+    if (window.ready) return;
+    const ctx = document.getElementById('canvas').getContext('2d');
+    const w = innerWidth, h = innerHeight;
+    ctx.fillStyle = '#0d0e11';
+    ctx.fillRect(0, 0, w, h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff6b6b';
+    ctx.font = '600 17px system-ui, sans-serif';
+    ctx.fillText('Приложение не запустилось', w / 2, h * 0.4);
+    ctx.fillStyle = '#c9ccd2';
+    ctx.font = '13px system-ui, sans-serif';
+    (window.boot.length ? window.boot : ['ошибка без описания'])
+      .slice(-4).forEach((t, i) => ctx.fillText(String(t).slice(0, 64), w / 2, h * 0.45 + i * 22));
+  }, 4000);
+</script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

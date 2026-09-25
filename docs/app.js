@@ -5,11 +5,11 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v13 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v14 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
-const errors = [];
+const errors = window.boot || [];
 addEventListener('error', (e) => errors.push(e.message));
 addEventListener('unhandledrejection', (e) => errors.push(String(e.reason?.message || e.reason)));
 
@@ -31,6 +31,9 @@ const state = {
   moments: [],
   track: null,             // какая песня выбрана сейчас
 };
+// Запись: объявлено здесь, потому что цикл отрисовки рисует отсчёт раньше, чем дойдёт
+// очередь до раздела записи ниже.
+const rec = { recorder: null, chunks: [], type: '', timer: null, wake: null, count: null };
 state.video.playsInline = true;
 state.video.muted = true;
 state.video.setAttribute('playsinline', '');
@@ -618,9 +621,11 @@ function loop() {
   } catch (err) {
     if (err.message !== lastError) {          // сбой в отрисовке не должен всё гасить
       lastError = err.message;
+      errors.push(`отрисовка: ${err.message}`);
       status(`Сбой отрисовки: ${err.message}`);
       console.error(err);
     }
+    try { hello(); } catch { /* тогда уже ничем не помочь */ }
   }
   requestAnimationFrame(loop);
 }
@@ -677,12 +682,12 @@ addEventListener('orientationchange', () => setTimeout(fit, 250));
 visualViewport?.addEventListener('resize', fit);
 fit();
 loop();
+window.ready = true;              // сторож в index.html: приложение поднялось
 
 // ---------- отдельный режим записи ----------
 // Нажал «Запись» — интерфейс уходит, идёт отсчёт 3-2-1, песня запускается сама,
 // на экране только время и круглая кнопка «стоп».
 
-const rec = { recorder: null, chunks: [], type: '', timer: null, wake: null, count: null };
 let mix = null;                       // звук песни + микрофон, собираем один раз
 
 function mixer() {
@@ -784,12 +789,12 @@ function saveVideo() {
   const name = `yeahmusic-${Date.now()}.${rec.type.includes('mp4') ? 'mp4' : 'webm'}`;
   const file = new File([blob], name, { type: rec.type });
   if (navigator.canShare?.({ files: [file] })) {      // на телефоне — сразу «Поделиться»
-    navigator.share({ files: [file] }).catch(() => download(blob, name));
-  } else download(blob, name);
+    navigator.share({ files: [file] }).catch(() => saveFile(blob, name));
+  } else saveFile(blob, name);
   status(`Клип готов: ${Math.round(blob.size / 104857.6) / 10} МБ.`);
 }
 
-function download(blob, name) {
+function saveFile(blob, name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
