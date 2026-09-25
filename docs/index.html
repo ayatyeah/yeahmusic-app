@@ -13,8 +13,10 @@
   :root { --bg:#101113; --panel:#181a1e; --card:#1f232a; --line:#2a2e35; --text:#e6e6e6;
           --dim:#8a8f98; --accent:#5b6cff; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height:100%; overflow:hidden; }
   body { margin:0; background:var(--bg); color:var(--text);
-         font:15px/1.45 Inter, system-ui, sans-serif; overscroll-behavior:none; }
+         font:15px/1.45 Inter, system-ui, sans-serif; overscroll-behavior:none;
+         position:fixed; inset:0; touch-action:manipulation; }
   canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
 
   #panel { position:fixed; inset:auto 0 0 0; z-index:5; background:var(--panel);
@@ -90,6 +92,7 @@
     <button id="stopBtn" disabled>■ Стоп</button>
     <button id="camBtn">📷 Камера</button>
     <button id="demoBtn">✨ Проверка эффектов</button>
+    <button id="fullBtn">⛶ Во весь экран</button>
   </div>
 
   <h2>Эффекты</h2>

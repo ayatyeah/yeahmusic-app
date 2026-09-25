@@ -58,7 +58,16 @@ export class Stage {
 
   shapeBox(name) {
     const [aspect, height] = SHAPES[name];
-    const h = this.H * height, w = h * aspect;
+    const phone = this.H / this.W > 1.4;         // вертикальный экран — растягиваем по ширине
+    let w, h;
+    if (phone) {
+      w = this.W;
+      h = Math.min(w / aspect, this.H * 0.82);
+      w = Math.min(w, h * aspect);
+    } else {
+      h = this.H * height;
+      w = h * aspect;
+    }
     return { x: (this.W - w) / 2, y: (this.H - h) / 2, w, h };
   }
 
@@ -120,20 +129,26 @@ export class Stage {
         words: words.map((w, i) => [w, duration * 0.7 * i / Math.max(1, words.length)]) });
       return null;
     }
-    const w = this.W * CARD.w, h = this.H * CARD.h;
+    const phone = this.H / this.W > 1.4;
+    const w = this.W * (phone ? 0.86 : CARD.w), h = this.H * (phone ? 0.16 : CARD.h);
     const cam = this.box(now);
     const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
     const face = { x: cam.x + cam.w / 5, y: cam.y + cam.h / 6, w: cam.w * 0.6, h: cam.h * 0.66 };
     const center = { x: this.W * 0.1, y: this.H * 0.55, w: this.W * 0.8, h: this.H * 0.28 };
     const busy = [face, center, ...this.cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }))];
-    let pos = null, fallback = null;
-    for (let i = 0; i < 80; i++) {
-      const box = { x: 20 + Math.random() * (this.W - w - 40),
-                    y: this.H * 0.16 + Math.random() * (this.H * 0.5 - h), w, h };
-      fallback = fallback || box;
-      if (busy.some((b) => hits(box, b))) continue;      // ни на лицо, ни на другие строки
-      pos = box; break;
+    // места для строк: сверху и снизу от кадра, ряд за рядом — так они не налезают
+    const slots = [];
+    for (const top of [this.H * 0.07, cam.y + cam.h + 12]) {
+      for (let k = 0; k < 3; k++) {
+        const y = top + k * (h + 10);
+        if (y + h > this.H - 30) break;
+        slots.push({ x: (this.W - w) / 2 + (phone ? 0 : (k % 2 ? 1 : -1) * this.W * 0.12),
+                     y, w, h });
+      }
     }
+    const free = slots.filter((slot) => !busy.some((b) => hits(slot, b)));
+    const pos = free.length ? free[Math.floor(Math.random() * free.length)] : null;
+    const fallback = slots[0] || { x: 20, y: this.H * 0.1, w, h };
     const card = { text, ...(pos || fallback || { x: 20, y: this.H * 0.3 }), w, h,
                    born: now, charMs: ms, push: [0, 0], pushAt: -9 };
     this.cards.push(card);

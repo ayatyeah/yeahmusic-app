@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v8 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v9 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -249,8 +249,28 @@ function stopCamera() {
 
 // ---------- показ ----------
 
+/** Во весь экран: на Android — настоящий полноэкранный режим, на iPhone — установка PWA. */
+async function goFullscreen() {
+  try {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+      await screen.orientation?.lock?.('portrait').catch(() => {});
+    }
+  } catch { /* не дали — не страшно */ }
+}
+
+$('fullBtn').onclick = async () => {
+  if (document.fullscreenElement) { document.exitFullscreen(); return; }
+  await goFullscreen();
+  if (!document.fullscreenElement) {
+    status('Браузер не даёт полный экран. На iPhone: «Поделиться» → «На экран Домой» — '
+           + 'приложение откроется без полос браузера.');
+  }
+};
+
 async function start() {
   if (!state.audio.src) { status('Сначала добавь или выбери песню.'); return; }
+  await goFullscreen();
   if (state.flags.camera) await startCamera();
   state.nextLine = 0; state.nextBoom = 0; state.lastEq = -9; state.lastWord = -9;
   stage.cards = []; stage.effects = [];
