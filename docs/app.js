@@ -394,20 +394,60 @@ function sound(kind) {
 
 // ---------- главный цикл ----------
 
+let lastError = '';
+
 function loop() {
-  const now = performance.now() / 1000;
-  const songTime = state.audio.currentTime;
-  if (state.playing) timeline(songTime, now);
-  vision.segment = state.flags.silhouette && vision.ready && inMoment(songTime);
-  stage.zoomTarget = inMoment(songTime) ? 1.3 : 1;      // в особом моменте — ближе к лицу
-  if (state.flags.camera && vision.ready) {
-    const cam = stage.box(now);
-    for (const e of vision.process(state.video, now)) handleEvent(e, now, cam);
+  try {
+    const now = performance.now() / 1000;
+    const songTime = state.audio.currentTime;
+    if (state.playing) timeline(songTime, now);
+    vision.segment = state.flags.silhouette && vision.ready && inMoment(songTime);
+    stage.zoomTarget = inMoment(songTime) ? 1.3 : 1;      // в особом моменте — ближе к лицу
+    if (state.flags.camera && vision.ready) {
+      const cam = stage.box(now);
+      for (const e of vision.process(state.video, now)) handleEvent(e, now, cam);
+    }
+    const live = state.stream && state.video.readyState >= 2;
+    stage.draw(now, state.flags.camera && live ? state.video : null,
+               state.flags.hands || state.flags.silhouette ? vision : null);
+    if (!live) hello();                       // камеры нет — объясняем, что нажать
+  } catch (err) {
+    if (err.message !== lastError) {          // сбой в отрисовке не должен всё гасить
+      lastError = err.message;
+      status(`Сбой отрисовки: ${err.message}`);
+      console.error(err);
+    }
   }
-  stage.draw(now, state.flags.camera ? state.video : null,
-             state.flags.hands || state.flags.silhouette ? vision : null);
   requestAnimationFrame(loop);
 }
+
+/** Заставка, пока камера не включена: чтобы экран не был просто чёрным. */
+function hello() {
+  const ctx = stage.ctx, W = stage.W, H = stage.H;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#171a21');
+  grad.addColorStop(1, '#0d0e11');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e6e6e6';
+  ctx.font = `700 ${Math.round(H * 0.034)}px Inter, system-ui, sans-serif`;
+  ctx.fillText('YeahMusic', W / 2, H * 0.38);
+  ctx.fillStyle = '#8a8f98';
+  ctx.font = `${Math.round(H * 0.019)}px Inter, system-ui, sans-serif`;
+  const lines = state.stream
+    ? ['Камера включается…']
+    : ['Нажми «📷 Камера», чтобы увидеть себя',
+       'Меню — кнопка ☰ сверху или полоска снизу',
+       'Там же: свои песни, разметка и запись'];
+  lines.forEach((t, i) => ctx.fillText(t, W / 2, H * 0.45 + i * H * 0.035));
+}
+
+// первое касание экрана — можно просить камеру (браузер разрешает только после жеста)
+addEventListener('pointerdown', function first() {
+  removeEventListener('pointerdown', first);
+  if (state.flags.camera && !state.stream) startCamera();
+}, { once: false });
 
 addEventListener('resize', () => stage.resize());
 stage.resize();
