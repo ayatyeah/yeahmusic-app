@@ -1,0 +1,6 @@
+# сервер для веб-версии (без pygame, Tk и Qt — им нужен экран)
+fastapi
+uvicorn[standard]
+python-multipart
+numpy
+openai

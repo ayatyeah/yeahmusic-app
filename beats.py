@@ -10,7 +10,11 @@
 import json
 
 import numpy as np
-import pygame
+
+try:
+    import pygame
+except ImportError:                    # на сервере pygame не нужен
+    pygame = None
 
 HOP = 512                  # шаг анализа в сэмплах (~11.6 мс при 44.1 кГц)
 WINDOW = 2048
@@ -22,15 +26,30 @@ LEVEL_BANDS = 5            # на столько полос делим низ с
 CACHE_NAME = "beats.json"
 
 
-def load_mono(path):
-    """Сэмплы песни (моно, float) и частота — через pygame, он уже умеет mp3."""
-    if not pygame.mixer.get_init():
-        pygame.mixer.init()
-    rate = pygame.mixer.get_init()[0]
-    data = pygame.sndarray.array(pygame.mixer.Sound(str(path))).astype(np.float32)
-    if data.ndim > 1:
-        data = data.mean(axis=1)
-    return data / 32768.0, rate
+def load_mono(path, rate=44100):
+    """Сэмплы песни (моно, float) и частота.
+    На компьютере берём через pygame, на сервере (где нет звуковой карты) — через ffmpeg."""
+    try:
+        if pygame is None:
+            raise RuntimeError("без pygame")
+        if not pygame.mixer.get_init():
+            pygame.mixer.init(frequency=rate)
+        rate = pygame.mixer.get_init()[0]
+        data = pygame.sndarray.array(pygame.mixer.Sound(str(path))).astype(np.float32)
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        return data / 32768.0, rate
+    except Exception:
+        return decode_ffmpeg(path, rate), rate
+
+
+def decode_ffmpeg(path, rate):
+    """Звук → моно float через ffmpeg (нужен только на сервере)."""
+    import subprocess
+    out = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "s16le",
+                          "-ac", "1", "-ar", str(rate), "-"],
+                         check=True, capture_output=True).stdout
+    return np.frombuffer(out, np.int16).astype(np.float32) / 32768.0
 
 
 def onset_strength(x, rate):

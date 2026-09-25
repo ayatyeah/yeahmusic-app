@@ -67,6 +67,16 @@
     <span class="chip" id="mirrorChip" data-flag="mirror">Зеркало</span>
   </div>
 
+  <details id="serverBox">
+    <summary class="dim" style="cursor:pointer;margin:6px 0">🤖 Сделать разметку на сервере</summary>
+    <p class="dim" style="margin:6px 0">Вставь текст песни — сервер услышит тайминги,
+      посчитает биты и разметит строки. Песня на сервере не сохраняется.</p>
+    <textarea id="lyrics" rows="5" placeholder="Текст песни, по строке на строку"
+      style="width:100%;background:#12141a;color:var(--text);border:1px solid var(--line);
+             border-radius:10px;padding:10px;font:inherit"></textarea>
+    <div class="row"><button id="prepareBtn">Обработать</button></div>
+  </details>
+
   <div class="row">
     <button id="startBtn" class="accent">▶ Показать</button>
     <button id="stopBtn" disabled>■ Стоп</button>

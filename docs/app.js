@@ -59,6 +59,31 @@ $('dataFile').onchange = async (e) => {
   }
 };
 
+// Обработка песни на сервере: тайминги, биты и разметка ИИ — прямо с телефона.
+$('prepareBtn').onclick = async () => {
+  const file = $('audioFile').files[0];
+  if (!file) { status('Сначала выбери песню.'); return; }
+  const form = new FormData();
+  form.append('audio', file);
+  form.append('lyrics', $('lyrics').value);
+  form.append('name', file.name.replace(/\.[^.]+$/, ''));
+  $('prepareBtn').disabled = true;
+  status('Сервер слушает песню, это примерно минута…');
+  try {
+    const res = await fetch('api/prepare', { method: 'POST', body: form });
+    if (!res.ok) throw new Error((await res.text()).slice(0, 200));
+    state.data = await res.json();
+    state.moments = findMoments(state.data.lines || []);
+    const big = state.data.lines.filter((l) => l.big).length;
+    status(state.data.ai
+      ? `Готово: строк ${state.data.lines.length}, крупных ${big}, темп ${state.data.bpm}.`
+      : `Биты посчитаны (темп ${state.data.bpm}), но тайминги не распознать: на сервере нет ключа.`);
+  } catch (err) {
+    status(`Сервер не справился: ${err.message}`);
+  }
+  $('prepareBtn').disabled = false;
+};
+
 $('demoBtn').onclick = () => {
   state.data = null;
   state.moments = [];
