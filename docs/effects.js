@@ -201,32 +201,35 @@ export class Stage {
       return null;
     }
     const phone = this.phone;
-    const w = (phone ? this.safeW * 0.96 : this.W * CARD.w), h = this.H * (phone ? 0.12 : CARD.h);
+    const w = phone ? this.safeW * (0.5 + Math.random() * 0.44) : this.W * CARD.w;
+    // высота — по тому, сколько строк реально получится: иначе коробка занимает пол-экрана
+    const size = this.H * 0.028;
+    const perLine = Math.max(8, Math.floor((w - 30) / (size * 0.52)));
+    const rows = Math.max(1, Math.ceil(text.length / perLine));
+    const h = phone ? rows * size * 1.2 + 24 : this.H * CARD.h;
     const cam = this.box(now);
-    const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-    const face = { x: cam.x + cam.w / 5, y: cam.y + cam.h / 6, w: cam.w * 0.6, h: cam.h * 0.66 };
-    const center = { x: this.W * 0.1, y: this.H * 0.55, w: this.W * 0.8, h: this.H * 0.28 };
-    const busy = [face, center, ...this.cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }))];
-    // места для строк: сверху и снизу от кадра, ряд за рядом — так они не налезают
-    const slots = [];
-    const full = cam.h > this.H * 0.9;
-    const top = this.topY + 10;                       // ниже чёлки и строки с названием
-    const floor = this.bottomY - 10;                  // выше нижней панели
-    const bands = full ? [top, this.H * 0.58] : [top, Math.max(top, cam.y + cam.h + 12)];
-    for (const band of bands) {
-      for (let k = 0; k < 3; k++) {
-        const y = band + k * (h + 10);
-        if (y + h > floor) break;
-        slots.push({ x: this.midX - w / 2 + (phone ? 0 : (k % 2 ? 1 : -1) * this.W * 0.12),
-                     y, w, h });
-      }
+    const cover = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+                          * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    // лицо держим свободным: при слежении оно ровно в середине видимого кадра
+    const face = { x: cam.x + cam.w * 0.28, y: cam.y + cam.h * 0.22,
+                   w: cam.w * 0.44, h: cam.h * 0.34 };
+    const busy = [face, ...this.cards.map((c) => ({ x: c.x - 8, y: c.y - 8,
+                                                    w: c.w + 16, h: c.h + 16 }))];
+    if (this.effects.some((e) => e.kind === 'center')) {      // там сейчас крупная строка
+      busy.push({ x: this.leftX, y: this.H * 0.5, w: this.safeW, h: this.H * 0.33 });
     }
-    const free = slots.filter((slot) => !busy.some((b) => hits(slot, b)));
-    const pos = free.length ? free[Math.floor(Math.random() * free.length)] : null;
-    if (!pos) this.cards.shift();                     // свободного места нет — убираем старую
-    const fallback = slots[0] || { x: 20, y: top, w, h };
-    const card = { text, ...(pos || fallback), w, h,
-                   born: now, charMs: ms, push: [0, 0], pushAt: -9 };
+    // место — случайное по всей свободной части экрана, лишь бы ни на что не налезло
+    const top = this.topY + 6, floor = this.bottomY - 6;
+    const spanX = Math.max(0, this.safeW - w), spanY = Math.max(0, floor - top - h);
+    let pos = null, best = null, least = Infinity;
+    for (let i = 0; i < 40; i++) {
+      const cand = { x: this.leftX + Math.random() * spanX, y: top + Math.random() * spanY, w, h };
+      const score = busy.reduce((sum, b) => sum + cover(cand, b), 0);
+      if (!score) { pos = cand; break; }
+      if (score < least) { least = score; best = cand; }
+    }
+    if (!pos) this.cards.shift();                     // всё занято — убираем старую строку
+    const card = { text, ...(pos || best), born: now, charMs: ms, push: [0, 0], pushAt: -9 };
     this.cards.push(card);
     while (this.cards.length > (phone ? 2 : 3)) this.cards.shift();
     return card;
