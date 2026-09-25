@@ -69,6 +69,9 @@ export class Stage {
     this.focus = { x: 0.5, y: 0.45 };
     this.faceAt = -9;
     this.grain = null;
+    this.breakout = false;       // камера в рамке: руки и голова вылезают за её край
+    this.buf = null;             // холст, где вырезаем человека по силуэту
+    this.blur = null;            // мелкий холст для размытого фона
   }
 
   get topY() { return this.safe.top || 0; }
@@ -105,6 +108,17 @@ export class Stage {
     this.ctx.imageSmoothingQuality = 'high';
     this.W = w;
     this.H = h;
+    this.dpr = dpr;
+  }
+
+  /** Холст под размер экрана — для вырезания человека по маске. */
+  buffer() {
+    if (!this.buf) this.buf = document.createElement('canvas');
+    if (this.buf.width !== this.cv.width || this.buf.height !== this.cv.height) {
+      this.buf.width = this.cv.width;
+      this.buf.height = this.cv.height;
+    }
+    return this.buf;
   }
 
   /** Режим съёмки: холст рисуется в размер клипа (1080 по ширине). */
@@ -125,6 +139,11 @@ export class Stage {
   get phone() { return this.H / this.W > 1.4; }
 
   shapeBox(name) {
+    if (this.phone && this.breakout) {          // рамка по центру — из неё можно вылезти
+      const w = this.safeW * 0.84;
+      const h = Math.min((this.bottomY - this.topY) * 0.64, w * 1.3);
+      return { x: this.midX - w / 2, y: this.topY + (this.bottomY - this.topY - h) * 0.45, w, h };
+    }
     if (this.phone) return { x: 0, y: 0, w: this.W, h: this.H };   // на телефоне — весь экран
     const [aspect, height] = SHAPES[name];
     const h = this.H * height, w = h * aspect;
@@ -337,6 +356,7 @@ export class Stage {
     const sy = clamp(fy * vh - sh * FACE_UP, 0, vh - sh);
     // какую часть кадра видно — руки и силуэт рисуем по этим же долям, иначе будет сдвиг
     this.view = { sx: sx / vw, sy: sy / vh, sw: sw / vw, sh: sh / vh };
+    if (this.breakout) this.drawBackdrop(ctx, video);   // за рамкой — размытый тот же кадр
     const paint = (box, alpha = 1) => {
       ctx.save();
       ctx.globalAlpha = alpha;
@@ -367,11 +387,15 @@ export class Stage {
       ctx.restore();
     }
     paint(cam);
-    if (this.film) this.drawFilm(ctx, cam, now);
+    // руки и голова за краем рамки: тот же кадр, вырезанный по силуэту
+    if (this.breakout) this.drawSpill(ctx, cam, video, vision, now, { sx, sy, sw, sh });
+    if (this.film) {
+      this.drawFilm(ctx, this.breakout ? { x: 0, y: 0, w: this.W, h: this.H } : cam, now);
+    }
     if (vision) vision.draw(ctx, cam, now, this.mirror, this.view);
     this.drawSparks(ctx, now);
-    ctx.strokeStyle = 'rgba(189,189,189,.85)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = this.breakout ? 'rgba(255,255,255,.92)' : 'rgba(189,189,189,.85)';
+    ctx.lineWidth = this.breakout ? 2 : 1;
     ctx.strokeRect(cam.x + 0.5, cam.y + 0.5, cam.w - 1, cam.h - 1);
     if (this.anim && this.anim.kind === 'jump') {  // след за окном при полёте
       this.ghosts = [{ box: { ...cam }, alpha: 0.35 }, ...this.ghosts].slice(0, 3)
@@ -432,6 +456,57 @@ export class Stage {
       size: 12 + Math.random() * 14, age: 0, life: 1.2 + Math.random() * 0.8,
       color: colors[Math.floor(Math.random() * 3)] });
     if (this.hearts.length > 60) this.hearts.shift();
+  }
+
+  /** Фон за рамкой: тот же кадр, сильно уменьшенный (получается мягкое размытие) и затемнённый. */
+  drawBackdrop(ctx, video) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw) return;
+    const aspect = this.W / this.H;
+    let sw = vw, sh = vh;
+    if (vw / vh > aspect) sw = vh * aspect; else sh = vw / aspect;
+    if (!this.blur) {
+      this.blur = document.createElement('canvas');
+      this.blur.width = 40;
+      this.blur.height = Math.max(1, Math.round(40 / aspect));
+    }
+    const small = this.blur.getContext('2d');
+    small.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0,
+                    this.blur.width, this.blur.height);
+    ctx.save();
+    if (this.mirror) { ctx.translate(this.W, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(this.blur, 0, 0, this.W, this.H);
+    ctx.restore();
+    ctx.fillStyle = 'rgba(8,9,12,.55)';
+    ctx.fillRect(0, 0, this.W, this.H);
+  }
+
+  /** Всё, что человек высунул за край рамки. Внутри рамки кадр уже нарисован. */
+  drawSpill(ctx, cam, video, vision, now, g) {
+    const mask = vision && vision.maskAt ? vision.maskAt(now) : null;
+    if (!mask) return;
+    const k = cam.w / g.sw;                         // экранных пикселей в пикселе кадра
+    const x = cam.x - g.sx * k, y = cam.y - g.sy * k;
+    const w = video.videoWidth * k, h = video.videoHeight * k;
+    const buf = this.buffer();
+    const b = buf.getContext('2d');
+    b.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    b.clearRect(0, 0, this.W, this.H);
+    b.save();
+    if (this.mirror) { b.translate(cam.x * 2 + cam.w, 0); b.scale(-1, 1); }
+    b.drawImage(video, x, y, w, h);                 // весь кадр целиком, а не только рамка
+    b.globalCompositeOperation = 'destination-in';
+    b.drawImage(mask.canvas, x, y, w, h);           // оставляем только человека
+    b.restore();
+    ctx.save();
+    ctx.beginPath();                                // на экран — только то, что вне рамки
+    ctx.rect(0, 0, this.W, this.H);
+    ctx.rect(cam.x, cam.y, cam.w, cam.h);
+    ctx.clip('evenodd');
+    ctx.shadowColor = 'rgba(0,0,0,.5)';
+    ctx.shadowBlur = 16;
+    ctx.drawImage(buf, 0, 0, this.W, this.H);
+    ctx.restore();
   }
 
   /** Плёночный вид: тёплый подтон, виньетка и зерно — кадр перестаёт быть «видеозвонком». */

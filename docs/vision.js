@@ -204,7 +204,8 @@ export class Vision {
   constructor() {
     this.hands = [];
     this.masks = [];
-    this.segment = false;
+    this.segment = false;        // считать маску силуэта
+    this.ghosts = false;         // показывать тени-двойники (в особых моментах)
     this.gun = new GunDetector();
     this.motion = new MotionGestures();
     this.ready = false;
@@ -308,10 +309,12 @@ export class Vision {
       return [cam.x + (mirror ? 1 - fx : fx) * cam.w, cam.y + fy * cam.h];
     };
     if (this.segment) {
-      [[0.18, 0.33], [0.36, 0.2]].forEach(([delay, alpha]) => {
-        const m = this.maskAt(now - delay);
-        if (m) this.drawMask(ctx, cam, m, `rgba(120,220,255,${alpha})`, mirror, false, v);
-      });
+      if (this.ghosts) {
+        [[0.18, 0.33], [0.36, 0.2]].forEach(([delay, alpha]) => {
+          const m = this.maskAt(now - delay);
+          if (m) this.drawMask(ctx, cam, m, `rgba(120,220,255,${alpha})`, mirror, false, v);
+        });
+      }
       if (now < this.outlineUntil) {
         const m = this.maskAt(now);
         const k = Math.sin(Math.PI * (1 - (this.outlineUntil - now) / 1.2)) ** 0.6;

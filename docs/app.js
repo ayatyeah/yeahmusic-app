@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v17 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v18 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -27,7 +27,7 @@ const state = {
   stream: null,
   playing: false,
   flags: { camera: true, hands: true, silhouette: true, beat: true, mirror: true, plates: false,
-           film: true, face: true, zones: true, mic: false },
+           film: true, face: true, zones: true, mic: false, breakout: false },
   nextLine: 0, nextBoom: 0, lastEq: -9, lastSide: -9, side: 'right', lastWord: -9,
   moments: [],
   track: null,             // какая песня выбрана сейчас
@@ -55,6 +55,16 @@ document.querySelectorAll('.chip').forEach((chip) => {
     if (flag === 'film') stage.film = state.flags.film;
     if (flag === 'face') stage.follow = state.flags.face;
     if (flag === 'zones') fit();
+    if (flag === 'breakout') {
+      stage.breakout = state.flags.breakout;
+      if (state.flags.breakout && vision.ready && !vision.segmenter) {
+        vision.ready = false;                  // силуэт ещё не грузили — догружаем
+        loadVision();
+      }
+      status(state.flags.breakout
+        ? 'Камера в рамке: высунь руку или голову за край — они останутся видны.'
+        : 'Камера снова во весь экран.');
+    }
     if (flag === 'camera') state.flags.camera ? startCamera() : stopCamera();
   };
 });
@@ -261,10 +271,11 @@ async function startCamera() {
 
 async function loadVision() {
   if (vision.ready || vision.loading) return;
-  if (!state.flags.hands && !state.flags.silhouette) return;
+  if (!state.flags.hands && !state.flags.silhouette && !state.flags.breakout) return;
   vision.loading = true;
   try {
-    await vision.init({ wantHands: state.flags.hands, wantSegment: state.flags.silhouette,
+    await vision.init({ wantHands: state.flags.hands,
+                        wantSegment: state.flags.silhouette || state.flags.breakout,
                         wantFace: state.flags.face });
     status('Руки и силуэт подключены.');
   } catch (err) {
@@ -614,7 +625,10 @@ function loop() {
     keepSmooth(now);
     const songTime = state.audio.currentTime;
     if (state.playing) timeline(songTime, now);
-    vision.segment = state.flags.silhouette && vision.ready && inMoment(songTime);
+    // силуэт нужен и для выхода за рамку — там он работает всю песню, а не только в моменте
+    vision.segment = vision.ready && (state.flags.breakout
+      || (state.flags.silhouette && inMoment(songTime)));
+    vision.ghosts = state.flags.silhouette && inMoment(songTime);
     stage.zoomTarget = inMoment(songTime) ? 1.3 : 1;      // в особом моменте — ближе к лицу
     if (state.flags.camera && vision.ready) {
       const cam = stage.box(now);
@@ -623,7 +637,7 @@ function loop() {
     }
     const live = state.stream && state.video.readyState >= 2;
     stage.draw(now, state.flags.camera && live ? state.video : null,
-               state.flags.hands || state.flags.silhouette ? vision : null);
+               state.flags.hands || state.flags.silhouette || state.flags.breakout ? vision : null);
     if (!live) hello();                       // камеры нет — объясняем, что нажать
     drawCount();                              // 3-2-1 перед записью
   } catch (err) {
