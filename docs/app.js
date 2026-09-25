@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v10 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v11 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -213,9 +213,16 @@ async function startCamera() {
   }
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: {                                   // просим максимум — телефон даст, что сможет
+        facingMode: 'user',
+        width: { ideal: 1920 }, height: { ideal: 1080 },
+        frameRate: { ideal: 30, min: 24 },
+      },
       audio: false,
     });
+    const track = state.stream.getVideoTracks()[0];
+    const set = track?.getSettings?.() || {};
+    console.log('камера:', set.width, '×', set.height, set.frameRate, 'к/с');
     state.video.srcObject = state.stream;
     await state.video.play();
     status('Камера включена.');
@@ -524,6 +531,11 @@ function keepSmooth(now) {
   fps.value = fps.frames / (now - fps.since);
   fps.frames = 0;
   fps.since = now;
+  if (fps.value > 52 && stage.quality < 1) {     // тянет — возвращаем качество
+    stage.quality = 1;
+    stage.resize();
+    return;
+  }
   if (fps.value > 45 || !state.playing && !state.stream) return;
   if (state.flags.silhouette) {                   // силуэт — самое тяжёлое, гасим первым
     state.flags.silhouette = false;
@@ -616,7 +628,7 @@ $('recBtn').onclick = async () => {
     return;
   }
   try {
-    const canvasStream = $('canvas').captureStream(30);
+    const canvasStream = $('canvas').captureStream(60);
     const ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
     const dest = ctxAudio.createMediaStreamDestination();
     if (state.audio.src) {                       // песня — в запись
@@ -632,7 +644,8 @@ $('recBtn').onclick = async () => {
                                     ...dest.stream.getAudioTracks()]);
     const type = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm']
       .find((t) => MediaRecorder.isTypeSupported(t));
-    recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8_000_000 });
+    recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 14_000_000,
+                                           audioBitsPerSecond: 192_000 });
     chunks = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     recorder.onstop = () => {

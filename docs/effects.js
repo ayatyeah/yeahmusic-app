@@ -18,6 +18,7 @@ export class Stage {
   constructor(canvas) {
     this.cv = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });   // без прозрачности рисуется быстрее
+    this.ctx.imageSmoothingQuality = 'high';
     this.quality = 1;                                       // падает, если не вытягиваем
     this.cards = [];
     this.effects = [];          // вспышки, дырки от пуль, «ПАУ!», крупные слова
@@ -37,13 +38,18 @@ export class Stage {
     this.zoomTarget = 1;
     this.flashes = [];           // вспышки у пальца при выстреле
     this.hearts = [];
+    this.punch = 1;              // удар зумом в такт (когда кадр во весь экран)
+    this.rings = [];             // круги-волны от сильных ударов
+    this.sparks = [];            // искры под бит
+    this.splitUntil = 0;         // зеркальная симметрия кадра
   }
 
   resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 1.5) * this.quality;
+    const dpr = Math.min(devicePixelRatio || 1, 2) * this.quality;
     this.cv.width = Math.round(innerWidth * dpr);
     this.cv.height = Math.round(innerHeight * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.ctx.imageSmoothingQuality = 'high';
     this.W = innerWidth;
     this.H = innerHeight;
   }
@@ -81,6 +87,7 @@ export class Stage {
       if (t >= 1) this.shapeFrom = null;
     }
     const a = this.anim;
+    this.punch = 1;
     if (!a) return b;
     const t = clamp((now - a.start) / (a.ms / 1000), 0, 1);
     if (t >= 1) { this.anim = null; return b; }
@@ -88,6 +95,10 @@ export class Stage {
       const hit = t < 0.12 ? t / 0.12 : Math.exp(-(t - 0.12) * 6) * Math.cos((t - 0.12) * 9);
       const k = 1 + BOOM_SCALE * a.dir * hit;
       const dx = BOOM_SWAY * (a.sway || 0) * hit;
+      if (this.phone) {                       // кадр и так во весь экран — бьём зумом
+        this.punch = k;
+        return { ...b, x: b.x + dx };
+      }
       return { x: b.x - b.w * (k - 1) / 2 + dx, y: b.y - b.h * (k - 1) / 2, w: b.w * k, h: b.h * k };
     }
     if (a.kind === 'shake') {
@@ -217,6 +228,7 @@ export class Stage {
     ctx.clearRect(0, 0, this.W, this.H);
     const cam = this.box(now);
     if (video && video.readyState >= 2) this.drawCamera(ctx, cam, video, now, vision);
+    this.drawBeatFx(ctx, now);
     this.drawEq(ctx, now);
     for (const e of this.effects) if (e.kind === 'hole') this.drawHole(ctx, e, now);
     this.drawCards(ctx, now);
@@ -227,9 +239,15 @@ export class Stage {
       else if (e.kind === 'side') this.drawSide(ctx, e, now, cam);
       else if (e.kind === 'pow') this.drawPow(ctx, e, now);
       else if (e.kind === 'flash') {
+        const k = Math.max(0, 1 - (now - e.born) / e.life);
         ctx.save();
-        ctx.globalAlpha = 0.6 * Math.max(0, 1 - (now - e.born) / e.life);
-        ctx.fillStyle = '#fff';
+        ctx.globalCompositeOperation = 'lighter';
+        const grad = ctx.createRadialGradient(this.W / 2, this.H / 2, 0,
+                                              this.W / 2, this.H / 2, Math.max(this.W, this.H) * 0.7);
+        grad.addColorStop(0, `rgba(255,255,255,${0.75 * k})`);
+        grad.addColorStop(0.5, `rgba(120,140,255,${0.45 * k})`);
+        grad.addColorStop(1, `rgba(255,60,120,${0.2 * k})`);
+        ctx.fillStyle = grad;
         ctx.fillRect(0, 0, this.W, this.H);
         ctx.restore();
       }
@@ -244,7 +262,7 @@ export class Stage {
     let sw = vw, sh = vh;
     if (vw / vh > aspect) sw = vh * aspect; else sh = vw / aspect;
     this.zoom += (this.zoomTarget - this.zoom) * 0.06;      // плавное приближение к лицу
-    const zoom = this.zoom * this.shapeZoom();
+    const zoom = this.zoom * this.shapeZoom() * this.punch;
     sw /= zoom; sh /= zoom;
     const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
     // какую часть кадра видно — руки и силуэт рисуем по этим же долям, иначе будет сдвиг
@@ -279,6 +297,16 @@ export class Stage {
       ctx.restore();
     }
     paint(cam);
+    if (now < this.splitUntil) {              // зеркальная половина — симметричная картинка
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cam.x + cam.w / 2, cam.y, cam.w / 2, cam.h);
+      ctx.clip();
+      ctx.translate(cam.x * 2 + cam.w, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, sx, sy, sw, sh, cam.x, cam.y, cam.w, cam.h);
+      ctx.restore();
+    }
     if (vision) vision.draw(ctx, cam, now, this.mirror, this.view);
     this.drawSparks(ctx, now);
     ctx.strokeStyle = 'rgba(189,189,189,.85)';
@@ -343,6 +371,47 @@ export class Stage {
       size: 12 + Math.random() * 14, age: 0, life: 1.2 + Math.random() * 0.8,
       color: colors[Math.floor(Math.random() * 3)] });
     if (this.hearts.length > 60) this.hearts.shift();
+  }
+
+  ring(now, power = 1) { this.rings.push({ born: now, power }); }
+
+  split(now, seconds = 1.6) { this.splitUntil = now + seconds; }
+
+  spawnSparks(now, power = 1) {
+    for (let i = 0; i < 6 * power; i++) {
+      this.sparks.push({ x: Math.random() * this.W, y: this.H + 10,
+        vx: (Math.random() - 0.5) * 120, vy: -180 - Math.random() * 320,
+        r: 2 + Math.random() * 3, born: now, life: 0.8 + Math.random() * 0.7 });
+    }
+    if (this.sparks.length > 120) this.sparks.splice(0, this.sparks.length - 120);
+  }
+
+  /** Волны от ударов и искры — поверх картинки, но под текстом. */
+  drawBeatFx(ctx, now) {
+    this.rings = this.rings.filter((r) => now - r.born < 0.8);
+    for (const r of this.rings) {
+      const t = (now - r.born) / 0.8;
+      ctx.save();
+      ctx.globalAlpha = (1 - t) * 0.5 * r.power;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 6 * (1 - t) + 1;
+      ctx.beginPath();
+      ctx.arc(this.W / 2, this.H / 2, t * Math.max(this.W, this.H) * 0.7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    const dt = 1 / 60;
+    this.sparks = this.sparks.filter((s) => (now - s.born) < s.life);
+    ctx.save();
+    for (const s of this.sparks) {
+      s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 140 * dt;
+      ctx.globalAlpha = 1 - (now - s.born) / s.life;
+      ctx.fillStyle = '#ffe9a8';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   drawEq(ctx, now) {
