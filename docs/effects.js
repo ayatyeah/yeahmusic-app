@@ -41,7 +41,6 @@ export class Stage {
     this.punch = 1;              // удар зумом в такт (когда кадр во весь экран)
     this.rings = [];             // круги-волны от сильных ударов
     this.sparks = [];            // искры под бит
-    this.splitUntil = 0;         // зеркальная симметрия кадра
     // сколько сверху и снизу занято телефоном (чёлка, полоса «домой») и нашими кнопками
     this.safe = { top: 0, bottom: 0 };
   }
@@ -310,15 +309,6 @@ export class Stage {
       ctx.restore();
     }
     paint(cam);
-    if (now < this.splitUntil) {              // зеркальная половина — симметричная картинка
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(cam.x + cam.w / 2, cam.y, cam.w / 2, cam.h);
-      ctx.clip();
-      if (!this.mirror) { ctx.translate(cam.x * 2 + cam.w, 0); ctx.scale(-1, 1); }
-      ctx.drawImage(video, sx, sy, sw, sh, cam.x, cam.y, cam.w, cam.h);
-      ctx.restore();
-    }
     if (vision) vision.draw(ctx, cam, now, this.mirror, this.view);
     this.drawSparks(ctx, now);
     ctx.strokeStyle = 'rgba(189,189,189,.85)';
@@ -386,8 +376,6 @@ export class Stage {
   }
 
   ring(now, power = 1) { this.rings.push({ born: now, power }); }
-
-  split(now, seconds = 1.6) { this.splitUntil = now + seconds; }
 
   spawnSparks(now, power = 1) {
     for (let i = 0; i < 6 * power; i++) {

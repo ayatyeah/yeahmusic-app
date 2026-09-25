@@ -5,7 +5,7 @@ import { Stage } from './effects.js';
 import { Vision } from './vision.js';
 import { store } from './store.js';
 
-const VERSION = 'v14 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
+const VERSION = 'v15 · 25.09';        // видно на заставке — сразу понятно, обновилось ли
 const $ = (id) => document.getElementById(id);
 
 // Любая ошибка — на экран, а не в молчаливый чёрный фон.
@@ -427,7 +427,7 @@ function handleEvent(e, now, cam) {
   const name = e.name;
   if (name === 'cover') {
     if (state.audio.paused) state.audio.play(); else state.audio.pause();
-  } else if (name === 'wave') { stage.shake(1, now); stage.split(now); }
+  } else if (name === 'wave') stage.shake(1, now);
   else if (name === 'up') stage.jump([0, 1], now);
   else if (name === 'down') stage.jump([0, -1], now);
   else if (name === 'left') stage.jump([-1, 0], now);
@@ -527,7 +527,7 @@ $('demoBtn').onclick = () => {
   }, 3200);
   setTimeout(() => {
     const t = performance.now() / 1000;
-    stage.flash(t); stage.clones(t); stage.ring(t, 1); stage.split(t);
+    stage.flash(t); stage.clones(t); stage.ring(t, 1);
   }, 5200);
   void now;
 };
